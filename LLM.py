@@ -1,0 +1,42 @@
+from JpegImage import JpegImage
+import requests
+import json
+
+class LLM:
+    def __init__(self, api_url: str):
+        self.api_url = api_url
+
+    def call_llm(self, image: JpegImage, prompt: str) -> str | None:
+        headers = {"Content-Type": "application/json"}
+        payload = {
+            "model": "local-model",  # This might need to be adjusted
+
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {   "type": "text",
+                            "text": prompt
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{image.get_as_base64()}"
+                            }
+                        }
+                    ]
+                }
+            ],
+            "max_tokens": 10
+        }
+
+        try:
+            response = requests.post(self.api_url, headers=headers, json=payload)
+            response.raise_for_status()
+            content = response.json()['choices'][0]['message']['content']
+            return content
+        except requests.exceptions.RequestException as e:
+            print(f"API request failed: {e}")
+        except (KeyError, IndexError, json.JSONDecodeError) as e:
+            print(f"Could not parse API response: {e}")
+        return None
