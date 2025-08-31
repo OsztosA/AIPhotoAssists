@@ -77,7 +77,10 @@ def get_tags_from_llm(image_path):
 
 
 def write_exif_tags(image_path, tags, dry_run=False):
-    """Writes the given tags to the image's EXIF data."""
+    """
+    Writes the given tags to the image's EXIF data, preserving the original
+    file modification time.
+    """
     try:
         # piexif requires keywords to be a semicolon-separated string, encoded in UTF-16LE.
         keywords_str = ";".join(tags.get("keywords", []))
@@ -102,12 +105,19 @@ def write_exif_tags(image_path, tags, dry_run=False):
         if dry_run:
             print(f"[Dry Run] Would write tags to {image_path}: Title='{tags.get('title')}', Keywords='{keywords_str}'")
         else:
+            # Preserve original file timestamps
+            stat_info = os.stat(image_path)
+            original_atime = stat_info.st_atime
+            original_mtime = stat_info.st_mtime
+
             piexif.insert(exif_bytes, image_path)
+
+            # Restore original timestamps
+            os.utime(image_path, (original_atime, original_mtime))
             print(f"  -> Successfully wrote tags to {os.path.basename(image_path)}")
 
     except Exception as e:
         print(f"Error writing EXIF data to {image_path}: {e}")
-
 
 def process_single_image(image_path, dry_run):
     """
