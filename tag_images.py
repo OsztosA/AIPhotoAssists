@@ -133,6 +133,21 @@ def process_single_image(image_path, dry_run):
         print(f"\nCould not get tags for {os.path.basename(image_path)}. Skipping.")
 
 
+def has_existing_tags(image_path):
+    """Checks if an image already has XPTitle and XPKeywords EXIF tags."""
+    try:
+        exif_data = piexif.load(image_path)
+        # Check for the presence of Windows-specific Title and Keywords tags.
+        # We check if the key exists and if the value is not empty/null.
+        zeroth_ifd = exif_data.get("0th", {})
+        has_title = piexif.ImageIFD.XPTitle in zeroth_ifd and zeroth_ifd[piexif.ImageIFD.XPTitle]
+        has_keywords = piexif.ImageIFD.XPKeywords in zeroth_ifd and zeroth_ifd[piexif.ImageIFD.XPKeywords]
+        return has_title and has_keywords
+    except Exception:
+        # If there's any error reading EXIF (e.g., no EXIF data), assume no tags.
+        return False
+
+
 def process_images_in_directory(root_path, max_workers=5, dry_run=False):
     """Uses a thread pool to find and tag JPEG images in a directory, showing progress."""
     if not os.path.isdir(root_path):
@@ -143,24 +158,37 @@ def process_images_in_directory(root_path, max_workers=5, dry_run=False):
         print("--- Running in Dry Run mode. No files will be modified. ---")
 
     print(f"Scanning for images in '{root_path}'...")
-    image_paths = []
+    all_image_paths = []
     for dirpath, _, filenames in os.walk(root_path):
         for filename in filenames:
             if filename.lower().endswith(JPEG_EXTENSIONS):
-                image_paths.append(os.path.join(dirpath, filename))
+                all_image_paths.append(os.path.join(dirpath, filename))
 
-    total_images = len(image_paths)
-    if total_images == 0:
+    if not all_image_paths:
         print("No JPEG images found to process.")
         return
 
-    print(f"Found {total_images} images. Starting tagging with {max_workers} workers...")
+    print(f"Found {len(all_image_paths)} total images. Checking for existing tags...")
+
+    images_to_process = []
+    for path in all_image_paths:
+        if has_existing_tags(path):
+            print(f"Skipping '{os.path.basename(path)}', it already has tags.")
+        else:
+            images_to_process.append(path)
+
+    total_images = len(images_to_process)
+    if total_images == 0:
+        print("No images need tagging.")
+        return
+
+    print(f"\nStarting tagging for {total_images} images with {max_workers} workers...")
 
     processed_count = 0
     start_time = time.time()
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        future_to_path = {executor.submit(process_single_image, path, dry_run): path for path in image_paths}
+        future_to_path = {executor.submit(process_single_image, path, dry_run): path for path in images_to_process}
 
         for future in concurrent.futures.as_completed(future_to_path):
             original_path = future_to_path[future]
