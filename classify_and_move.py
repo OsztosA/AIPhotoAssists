@@ -1,26 +1,36 @@
 import os
 import argparse
-import base64
 import requests
 import shutil
 import re
 import concurrent.futures
 import time
-import sys
 
+from typing import Optional
 from JpegImage import JpegImage
 from LLM import LLM
+from ResponseParser import LLMResponseParser
 
 # Supported image extensions
 IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.gif', '.bmp')
 API_URL = "http://localhost:1234/v1/chat/completions"
-PROMPT = ("act as a photo assistant. and classify tis image on a scale from 0 to 100 where 0 means a totally bad image, "
+PROMPT = ("act as a photo assistant and classify this image on a scale from 0 to 100 where 0 means a totally bad image, "
           "out of focus, badly composed, "
           "and 100 means a perfect, sharp well designed professional photo. "
-          "Important family photos should get larger score. Respond with only the number.")
+          "Important family photos should get larger score. Important! Respond with only the number, just one number!")
 
 
-def classify_image(image_path):
+def _format_seconds(seconds: float) -> str:
+    seconds = max(0, int(seconds))
+    h, rem = divmod(seconds, 3600)
+    m, s = divmod(rem, 60)
+    if h > 0:
+        return f"{h:d}:{m:02d}:{s:02d}"
+    else:
+        return f"{m:02d}:{s:02d}"
+
+
+def classify_image(image_path: str) -> Optional[int]:
     """
     Sends an image to the local LLM endpoint for classification and returns a score.
     """
@@ -29,15 +39,13 @@ def classify_image(image_path):
 
         jpeg_image = JpegImage(image_path)
         response = llm.call_llm(jpeg_image, PROMPT)
+        if response is None:
+            return None
 
-        # Use regex to find the first number (integer or float) in the response
-        match = re.search(r'\d+', response)
-        if match:
-            score = int(match.group(0))
-            if 0 <= score <= 100:
-                return score
-            else:
-                print(f"Warning: Score '{score}' for {os.path.basename(image_path)} is out of 0-100 range.")
+        # Clean content and extract first integer score 0-100
+        score = LLMResponseParser.extract_first_int_in_range(response, 0, 100)
+        if score is not None:
+            return score
         else:
             print(
                 f"Warning: Could not parse score from response for {os.path.basename(image_path)}. Response: '{response}'")
@@ -50,7 +58,7 @@ def classify_image(image_path):
     return None
 
 
-def process_single_image(original_path, root_path, output_directory, dry_run=False):
+def process_single_image(original_path: str, root_path: str, output_directory: str, dry_run: bool = False):
     """
     Classifies a single image and moves it. Designed to be run in a thread pool.
     """
@@ -84,14 +92,14 @@ def process_single_image(original_path, root_path, output_directory, dry_run=Fal
 
             if not dry_run:
                 shutil.move(original_path, new_path)
-            print(f"  -> Moved to: {new_path}")
+            print(f"  -> {score_folder_name} - Moved to: {new_path}")
         except Exception as e:
             print(f"Error moving file {original_path}: {e}")
     else:
         print(f"  -> Could not get score for {original_path}. Skipping.")
 
 
-def process_images_in_directory(root_path, output_directory, max_workers=5, dry_run=False):
+def process_images_in_directory(root_path: str, output_directory: str, max_workers: int = 5, dry_run: bool = False):
     """
     Iterates through a directory, and uses a thread pool to classify and move images, showing progress.
     """
@@ -104,7 +112,7 @@ def process_images_in_directory(root_path, output_directory, max_workers=5, dry_
         return
 
     print(f"Scanning for images in '{root_path}'...")
-    image_paths = []
+    image_paths: list[str] = []
     for dirpath, _, filenames in os.walk(root_path):
         for filename in filenames:
             if filename.lower().endswith(IMAGE_EXTENSIONS):
@@ -135,23 +143,32 @@ def process_images_in_directory(root_path, output_directory, max_workers=5, dry_
 
             processed_count += 1
             elapsed_time = time.time() - start_time
-            images_per_sec = processed_count / elapsed_time if elapsed_time > 0 else 0
+            avg_rate = processed_count / elapsed_time if elapsed_time > 0 else 0.0
+            remaining = total_images - processed_count
+            eta_seconds = (remaining / avg_rate) if avg_rate > 0 else 0.0
+            avg_time_img = (elapsed_time / processed_count) if processed_count > 0 else 0.0
 
             # Display progress on a single, updating line
-            progress_message = f"Progress: {processed_count}/{total_images} | Rate: {images_per_sec:.2f} images/sec"
-            sys.stdout.write(f"\r{progress_message.ljust(60)}") # ljust to clear previous line content
-            sys.stdout.flush()
+            progress_message = (
+                f"Progress: {processed_count}/{total_images} | "
+                f"Avg: {avg_rate:.2f} img/s | "
+                f"Avg time/img: {avg_time_img:.2f}s | "
+                f"ETA: {_format_seconds(eta_seconds)}"
+            )
+            print(f"\r{progress_message.ljust(120)}", end="", flush=True)
 
     # Final summary
     end_time = time.time()
     total_duration = end_time - start_time
     average_rate = total_images / total_duration if total_duration > 0 else 0
+    average_time_per_image = (total_duration / total_images) if total_images > 0 else 0.0
 
-    print() # Move to the next line after the progress bar
+    print()  # Move to the next line after the progress bar
     print("\n--- Processing Summary ---")
     print(f"Total images processed: {total_images}")
     print(f"Total time taken: {total_duration:.2f} seconds")
     print(f"Average processing rate: {average_rate:.2f} images/sec")
+    print(f"Average time per image: {average_time_per_image:.2f} seconds")
     print("Processing complete.")
 
 

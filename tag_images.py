@@ -3,10 +3,11 @@ import os
 import argparse
 import concurrent.futures
 import time
-import sys
+import requests
 
 from JpegImage import JpegImage
 from LLM import LLM
+from ResponseParser import LLMResponseParser
 
 # --- Configuration ---
 # IMPORTANT: Change this URL to your local model's endpoint.
@@ -21,6 +22,16 @@ PROMPT = """
   """
 
 
+def _format_seconds(seconds: float) -> str:
+    seconds = max(0, int(seconds))
+    h, rem = divmod(seconds, 3600)
+    m, s = divmod(rem, 60)
+    if h > 0:
+        return f"{h:d}:{m:02d}:{s:02d}"
+    else:
+        return f"{m:02d}:{s:02d}"
+
+
 def get_tags_from_llm(image: JpegImage) -> dict | None:
     """
     Sends an image to the local LLM endpoint and asks for metadata tags.
@@ -30,9 +41,11 @@ def get_tags_from_llm(image: JpegImage) -> dict | None:
     try:
 
         content = llm.call_llm(image, PROMPT)
-        tags = json.loads(content)
+        if content is None:
+            return None
+        tags = LLMResponseParser.extract_json_object(content)
         # Basic validation of the returned structure
-        if 'title' in tags and 'description' in tags and 'keywords' in tags:
+        if isinstance(tags, dict) and 'title' in tags and 'description' in tags and 'keywords' in tags:
             return tags
         else:
             print(
@@ -112,21 +125,30 @@ def process_images_in_directory(root_path, max_workers=5, dry_run=False):
 
             processed_count += 1
             elapsed_time = time.time() - start_time
-            images_per_sec = processed_count / elapsed_time if elapsed_time > 0 else 0
+            avg_rate = processed_count / elapsed_time if elapsed_time > 0 else 0.0
+            remaining = total_images - processed_count
+            eta_seconds = (remaining / avg_rate) if avg_rate > 0 else 0.0
+            avg_time_img = (elapsed_time / processed_count) if processed_count > 0 else 0.0
 
-            progress_message = f"Progress: {processed_count}/{total_images} | Rate: {images_per_sec:.2f} images/sec"
-            sys.stdout.write(f"\r{progress_message.ljust(60)}")
-            sys.stdout.flush()
+            progress_message = (
+                f"Progress: {processed_count}/{total_images} | "
+                f"Avg: {avg_rate:.2f} img/s | "
+                f"Avg time/img: {avg_time_img:.2f}s | "
+                f"ETA: {_format_seconds(eta_seconds)}"
+            )
+            print(f"\r{progress_message.ljust(120)}", end="", flush=True)
 
     end_time = time.time()
     total_duration = end_time - start_time
     average_rate = total_images / total_duration if total_duration > 0 else 0
+    average_time_per_image = (total_duration / total_images) if total_images > 0 else 0.0
 
     print() # Move to the next line after the progress bar
     print("\n--- Processing Summary ---")
     print(f"Total images processed: {total_images}")
     print(f"Total time taken: {total_duration:.2f} seconds")
     print(f"Average processing rate: {average_rate:.2f} images/sec")
+    print(f"Average time per image: {average_time_per_image:.2f} seconds")
     print("Processing complete.")
 
 
