@@ -146,6 +146,6 @@ python tag_images.py "C:\Users\MyUser\Pictures\MyAlbum" --dry-run
 - Python 3.10+
 - Windows 11
 - LM Studio 0.3.24 [Download](https://lmstudio.ai/)
-- Gemma 3 12B 8-bit [Download](https://huggingface.co/lmstudio-community/gemma-3-12b-it-GGUF)
+- qwen/qwen3-vl-8b [Download](https://lmstudio.ai/models/qwen/qwen3-vl-8b)
 - AMD Ryzen 7 7700X, 32GB RAM
 - AMD Radeon RX 7900XT
