@@ -16,7 +16,7 @@ except ImportError:  # pragma: no cover
     Image = ImageOps = ImageTk = None
 
 SETTINGS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gui_settings.json")
-THUMB_SIZE = 110  # max edge (px) of the in-progress preview thumbnails
+THUMB_SIZE = 240  # max edge (px) of the in-progress preview thumbnails
 
 
 class App(tk.Tk):
@@ -43,6 +43,8 @@ class App(tk.Tk):
         self.workers_var = tk.IntVar(value=s.get("workers", 5))
         self.dry_run_var = tk.BooleanVar(value=s.get("dry_run", True))  # safe default
         self.tags_var = tk.BooleanVar(value=s.get("with_tags", True))
+        self.resize_var = tk.IntVar(value=min(100, max(25, int(s.get("resize_percent", 100)))))
+        self.tag_count_var = tk.IntVar(value=max(1, int(s.get("tag_count", 5))))
         self.limit: int | None = None          # detected max parallel requests for current api+model
         self.model_types: dict[str, str | None] = {}  # model id -> 'vlm' / 'llm' / ... (LM Studio)
         self.limit_key: tuple | None = None
@@ -58,7 +60,8 @@ class App(tk.Tk):
         # Persist every setting as soon as it changes (debounced), not only on Start / close
         self._save_job = None
         for var in (self.source_var, self.target_var, self.api_var, self.model_var,
-                    self.workers_var, self.dry_run_var, self.tags_var):
+                    self.workers_var, self.dry_run_var, self.tags_var,
+                    self.resize_var, self.tag_count_var):
             var.trace_add("write", lambda *_: self._schedule_save())
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self.after(100, self._poll_queue)
@@ -108,6 +111,18 @@ class App(tk.Tk):
         self.workers_spin.pack(side="left")
         ttk.Label(opts, text="(limited to the model's max parallel requests)", foreground="#666").pack(
             side="left", padx=8)
+
+        opts2 = ttk.LabelFrame(root, text="LLM request", padding=8)
+        opts2.pack(fill="x", **pad)
+        ttk.Label(opts2, text="Tags to generate:").pack(side="left", padx=(8, 4))
+        ttk.Spinbox(opts2, from_=1, to=50, width=5, textvariable=self.tag_count_var).pack(side="left")
+        ttk.Label(opts2, text="Image size sent to LLM:").pack(side="left", padx=(24, 4))
+        self.resize_label = ttk.Label(opts2, width=5)
+        ttk.Scale(opts2, from_=25, to=100, orient="horizontal", length=180, variable=self.resize_var,
+                  command=lambda v: self.resize_var.set(round(float(v)))).pack(side="left")
+        self.resize_label.pack(side="left", padx=4)
+        self.resize_var.trace_add("write", lambda *_: self.resize_label.configure(text=f"{self.resize_var.get()}%"))
+        self.resize_label.configure(text=f"{self.resize_var.get()}%")
 
         # Controls
         controls = ttk.Frame(root)
@@ -336,6 +351,7 @@ class App(tk.Tk):
             "api_url": self.api_var.get(), "api_urls": self.backend_urls, "model": self.model_var.get(),
             "workers": self._workers(), "dry_run": self.dry_run_var.get(),
             "with_tags": self.tags_var.get(),
+            "resize_percent": self._resize_percent(), "tag_count": self._tag_count(),
         }
         try:
             with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
@@ -347,6 +363,18 @@ class App(tk.Tk):
         if self._save_job is not None:
             self.after_cancel(self._save_job)
         self._save_job = self.after(500, self._save_settings)
+
+    def _resize_percent(self) -> int:
+        try:
+            return min(100, max(25, int(self.resize_var.get())))
+        except (tk.TclError, ValueError):
+            return 100
+
+    def _tag_count(self) -> int:
+        try:
+            return max(1, int(self.tag_count_var.get()))
+        except (tk.TclError, ValueError):
+            return 5
 
     def _workers(self) -> int:
         try:
@@ -463,6 +491,7 @@ class App(tk.Tk):
             dry_run=self.dry_run_var.get(), api_url=self.api_var.get().strip(),
             model=self.model_var.get().strip() or cm.DEFAULT_MODEL,
             with_tags=self.tags_var.get(),
+            resize_percent=self._resize_percent(), tag_count=self._tag_count(),
         )
 
         def work():

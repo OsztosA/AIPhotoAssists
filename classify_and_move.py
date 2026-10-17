@@ -1,4 +1,4 @@
-import os
+﻿import os
 import argparse
 import requests
 import shutil
@@ -41,8 +41,12 @@ PROMPT_SCORE_ONLY = PROMPT + (
     "Example of a valid response: 72")
 
 PROMPT_WITH_TAGS = PROMPT + """
-Additionally, describe the photo with 3 to 8 short, lowercase English tags (e.g. people, child, beach, sunset, birthday, food, landscape, blurry, indoor).
+Additionally, describe the photo with exactly {tag_count} short, lowercase English tags (e.g. people, child, beach, sunset, birthday, food, landscape, blurry, indoor).
 Respond with ONLY a JSON object in exactly this format, with no other text: {"score": 72, "tags": ["family", "beach", "sunset"]}"""
+
+
+def prompt_with_tags(tag_count: int) -> str:
+    return PROMPT_WITH_TAGS.replace("{tag_count}", str(tag_count))
 
 
 def parse_score_and_tags(response: str) -> Optional[dict]:
@@ -140,7 +144,8 @@ def _fetch_ollama_model_infos(api_url: str, timeout: float = 5) -> list[dict]:
 
 
 def classify_image(image_path: str, api_url: str = API_URL, model: str = DEFAULT_MODEL,
-                   log: LogCallback = print, with_tags: bool = True) -> Optional[dict]:
+                   log: LogCallback = print, with_tags: bool = True,
+                   resize_percent: int = 100, tag_count: int = 5) -> Optional[dict]:
     """
     Sends an image to the local LLM endpoint for classification.
     Returns {'score': int, 'tags': [str]} (tags empty if not requested), or None on failure.
@@ -151,7 +156,8 @@ def classify_image(image_path: str, api_url: str = API_URL, model: str = DEFAULT
             log(f"Skipping empty file: {os.path.basename(image_path)}")
             return None
         jpeg_image = JpegImage(image_path)
-        response = llm.call_llm(jpeg_image, PROMPT_WITH_TAGS if with_tags else PROMPT_SCORE_ONLY)
+        response = llm.call_llm(jpeg_image, prompt_with_tags(tag_count) if with_tags else PROMPT_SCORE_ONLY,
+                            resize_percent)
         if response is None:
             return None
 
@@ -174,7 +180,8 @@ def classify_image(image_path: str, api_url: str = API_URL, model: str = DEFAULT
 def process_single_image(original_path: str, root_path: str, output_directory: str, dry_run: bool = False,
                          api_url: str = API_URL, model: str = DEFAULT_MODEL,
                          log: LogCallback = print, stop_event: Optional[threading.Event] = None,
-                         with_tags: bool = True, on_start: Optional[StartCallback] = None) -> dict:
+                         with_tags: bool = True, on_start: Optional[StartCallback] = None,
+                         resize_percent: int = 100, tag_count: int = 5) -> dict:
     """
     Classifies a single image and moves it. Designed to be run in a thread pool.
     Returns a dict: {'path', 'status', 'score', 'dest', 'tags'} where status is one of
@@ -196,7 +203,7 @@ def process_single_image(original_path: str, root_path: str, output_directory: s
     log(f"Processing: {original_path}")
     if on_start:
         on_start(original_path)
-    classification = classify_image(original_path, api_url, model, log, with_tags)
+    classification = classify_image(original_path, api_url, model, log, with_tags, resize_percent, tag_count)
 
     if classification is None:
         log(f"  -> Could not get score for {original_path}. Skipping.")
@@ -236,7 +243,8 @@ def run_classification(root_path: str, output_directory: str, max_workers: int =
                        stop_event: Optional[threading.Event] = None,
                        on_result: Optional[ResultCallback] = None,
                        on_start: Optional[StartCallback] = None,
-                       with_tags: bool = True) -> Optional[dict]:
+                       with_tags: bool = True, resize_percent: int = 100,
+                       tag_count: int = 5) -> Optional[dict]:
     """
     Core worker used by both CLI and GUI. Scans root_path, classifies and moves images using a
     thread pool. Reports progress through the optional `progress` callback with a dict containing:
@@ -294,7 +302,7 @@ def run_classification(root_path: str, output_directory: str, max_workers: int =
         # Map futures to their original paths for better error reporting
         future_to_path = {
             executor.submit(process_single_image, path, root_path, output_directory, dry_run,
-                            api_url, model, log, stop_event, with_tags, on_start): path
+                            api_url, model, log, stop_event, with_tags, on_start, resize_percent, tag_count): path
             for path in image_paths
         }
 
@@ -334,7 +342,7 @@ def run_classification(root_path: str, output_directory: str, max_workers: int =
 
 def process_images_in_directory(root_path: str, output_directory: str, max_workers: int = 5,
                                 dry_run: bool = False, api_url: str = API_URL, model: str = DEFAULT_MODEL,
-                                with_tags: bool = True):
+                                with_tags: bool = True, resize_percent: int = 100, tag_count: int = 5):
     """CLI wrapper around run_classification that shows a single-line progress bar."""
 
     def cli_progress(s: dict):
@@ -349,7 +357,8 @@ def process_images_in_directory(root_path: str, output_directory: str, max_worke
         print(f"\r{message.ljust(120)}", end="", flush=True)
 
     run_classification(root_path, output_directory, max_workers, dry_run, api_url, model,
-                       log=lambda m: print(f"\n{m}"), progress=cli_progress, with_tags=with_tags)
+                       log=lambda m: print(f"\n{m}"), progress=cli_progress, with_tags=with_tags,
+                       resize_percent=resize_percent, tag_count=tag_count)
 
 
 if __name__ == "__main__":
@@ -392,10 +401,18 @@ if __name__ == "__main__":
         help="Only ask the LLM for a score, not for descriptive tags."
     )
     parser.add_argument(
+        "--resize", type=int, default=100, choices=range(25, 101), metavar="25-100",
+        help="Resize the image to this percentage before sending it to the LLM. Default is 100."
+    )
+    parser.add_argument(
+        "--tag-count", type=int, default=5,
+        help="Number of tags to ask the LLM for. Default is 5."
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Run the script without moving any files. Prints the actions that would be taken."
     )
     args = parser.parse_args()
     process_images_in_directory(args.directory, args.output_directory, args.workers, args.dry_run,
-                                args.api_url, args.model, not args.no_tags)
+                                args.api_url, args.model, not args.no_tags, args.resize, max(1, args.tag_count))

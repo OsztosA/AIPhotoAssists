@@ -10,10 +10,10 @@ class LLM:
         self.model = model or "local-model"
         self.timeout = timeout
 
-    def call_llm(self, image: JpegImage, prompt: str) -> str | None:
+    def call_llm(self, image: JpegImage, prompt: str, scale_percent: int = 100) -> str | None:
         headers = {"Content-Type": "application/json"}
         # Works for both OpenAI-compatible servers and Ollama (chosen by the URL, see LLMBackend)
-        payload = LLMBackend.build_chat_payload(self.api_url, self.model, prompt, image.get_as_base64())
+        payload = LLMBackend.build_chat_payload(self.api_url, self.model, prompt, image.get_as_base64(scale_percent))
 
         try:
             response = requests.post(self.api_url, headers=headers, json=payload, timeout=self.timeout)

@@ -1,20 +1,32 @@
 import base64
+import io
 import os
 
 import piexif
+from PIL import Image
 
 
 class JpegImage:
     def __init__(self, path):
         self.path = path
 
-    def get_as_base64(self):
-            try:
+    def get_as_base64(self, scale_percent: int = 100):
+        """Returns the image as base64 JPEG, downscaled to scale_percent (25-100) of its size."""
+        try:
+            if scale_percent >= 100:
                 with open(self.path, "rb") as image_file:
                     return base64.b64encode(image_file.read()).decode('utf-8')
-            except IOError as e:
-                print(f"Error reading image file {self.path}: {e}")
-                return None
+            with Image.open(self.path) as im:
+                width, height = im.size
+                size = (max(1, round(width * scale_percent / 100)), max(1, round(height * scale_percent / 100)))
+                im.draft("RGB", size)  # fast downscaled JPEG decoding
+                im = im.convert("RGB").resize(size, Image.LANCZOS)
+                buf = io.BytesIO()
+                im.save(buf, format="JPEG", quality=90)
+                return base64.b64encode(buf.getvalue()).decode('utf-8')
+        except (IOError, OSError) as e:
+            print(f"Error reading image file {self.path}: {e}")
+            return None
 
     def has_existing_tags(self):
         try:
