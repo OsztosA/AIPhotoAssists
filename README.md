@@ -73,7 +73,7 @@ A Tkinter front end for `classify_and_move.py`: configure everything in one wind
 
 ### Running
 ```shell
-pip install requests pillow
+pip install -r requirements.txt
 python gui.py
 ```
 Tkinter ships with the standard Python installer. Pillow is optional but needed for the live image previews.
@@ -95,6 +95,13 @@ While running you see a progress bar with rate and ETA, thumbnails of the images
 - **Log**: messages and errors.
 
 All settings are saved automatically to `gui_settings.json` next to the script and restored on the next start.
+
+### Building a standalone executable
+To get a single `PhotoAssist.exe` that runs without a Python installation (Windows):
+```shell
+build.bat
+```
+This installs the dependencies from `requirements-build.txt` (including PyInstaller) and writes `dist\PhotoAssist.exe`. Use `build.bat clean` to remove previous build output first. The exe stores `gui_settings.json` next to itself.
 
 ---
 

@@ -2,6 +2,7 @@
 import json
 import os
 import queue
+import sys
 import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
@@ -15,7 +16,9 @@ try:  # Pillow is optional: without it the in-progress preview is simply disable
 except ImportError:  # pragma: no cover
     Image = ImageOps = ImageTk = None
 
-SETTINGS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gui_settings.json")
+# Next to the exe when frozen by PyInstaller (the bundled __file__ lives in a temp folder)
+APP_DIR = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
+SETTINGS_FILE = os.path.join(APP_DIR, "gui_settings.json")
 THUMB_SIZE = 240  # max edge (px) of the in-progress preview thumbnails
 
 
