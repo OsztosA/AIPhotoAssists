@@ -1,0 +1,10 @@
+# IDE
+.idea/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Local GUI settings
+gui_settings.json
