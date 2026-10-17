@@ -45,6 +45,8 @@ class App(tk.Tk):
         self.model_var = tk.StringVar(value=s.get("model", cm.DEFAULT_MODEL))
         self.workers_var = tk.IntVar(value=s.get("workers", 5))
         self.dry_run_var = tk.BooleanVar(value=s.get("dry_run", True))  # safe default
+        self.rename_var = tk.BooleanVar(value=bool(s.get("rename", False)))
+        self.rename_pattern_var = tk.StringVar(value=self._initial_rename_pattern(s))
         self.mode_var = tk.StringVar(value=s.get("mode", "copy") if s.get("mode") in ("copy", "move") else "copy")
         self.tags_var = tk.BooleanVar(value=s.get("with_tags", True))
         self.resize_var = tk.IntVar(value=min(100, max(25, int(s.get("resize_percent", 100)))))
@@ -65,6 +67,7 @@ class App(tk.Tk):
         self._save_job = None
         for var in (self.source_var, self.target_var, self.api_var, self.model_var,
                     self.workers_var, self.dry_run_var, self.mode_var, self.tags_var,
+                    self.rename_var, self.rename_pattern_var,
                     self.resize_var, self.tag_count_var):
             var.trace_add("write", lambda *_: self._schedule_save())
         self.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -113,6 +116,19 @@ class App(tk.Tk):
                         variable=self.mode_var).pack(side="left", **pad)
         ttk.Radiobutton(fileop, text="\u26a0 Move (originals are removed!)", value="move",
                         variable=self.mode_var, style="Danger.TRadiobutton").pack(side="left", **pad)
+
+        # Rename
+        rename = ttk.LabelFrame(root, text="Rename", padding=8)
+        rename.pack(fill="x", **pad)
+        rename.columnconfigure(1, weight=1)
+        ttk.Checkbutton(rename, text="Rename files", variable=self.rename_var,
+                        command=self._update_rename_state).grid(row=0, column=0, sticky="w", **pad)
+        self.rename_entry = ttk.Entry(rename, textvariable=self.rename_pattern_var)
+        self.rename_entry.grid(row=0, column=1, sticky="ew", **pad)
+        ttk.Label(rename, text="Tokens: YYYY MM DD HH24 MI SS (EXIF capture date), %NAME% (original name). "
+                               "':' becomes '.'; files without an EXIF date keep their name.",
+                  foreground="#666").grid(row=1, column=0, columnspan=2, sticky="w", padx=8)
+        self._update_rename_state()
 
         # Options
         opts = ttk.LabelFrame(root, text="Options", padding=8)
@@ -363,6 +379,17 @@ class App(tk.Tk):
         except (OSError, ValueError):
             return {}
 
+    @staticmethod
+    def _initial_rename_pattern(settings: dict) -> str:
+        saved = settings.get("rename_pattern")
+        # A pattern saved from the old default is upgraded to the current default
+        if not saved or saved == "YYYY.MM.DD HH24:MI:SS - %name%":
+            return cm.DEFAULT_RENAME_PATTERN
+        return saved
+
+    def _update_rename_state(self):
+        self.rename_entry.configure(state="normal" if self.rename_var.get() else "disabled")
+
     def _save_settings(self):
         if self._save_job is not None:
             self.after_cancel(self._save_job)
@@ -371,6 +398,7 @@ class App(tk.Tk):
             "source": self.source_var.get(), "target": self.target_var.get(),
             "api_url": self.api_var.get(), "api_urls": self.backend_urls, "model": self.model_var.get(),
             "workers": self._workers(), "dry_run": self.dry_run_var.get(), "mode": self.mode_var.get(),
+            "rename": self.rename_var.get(), "rename_pattern": self.rename_pattern_var.get(),
             "with_tags": self.tags_var.get(),
             "resize_percent": self._resize_percent(), "tag_count": self._tag_count(),
         }
@@ -511,6 +539,8 @@ class App(tk.Tk):
         args = dict(
             root_path=source, output_directory=target, max_workers=self._workers(),
             dry_run=self.dry_run_var.get(), copy_files=self.mode_var.get() == "copy",
+            rename_pattern=((self.rename_pattern_var.get().strip() or cm.DEFAULT_RENAME_PATTERN)
+                            if self.rename_var.get() else None),
             api_url=self.api_var.get().strip(),
             model=self.model_var.get().strip() or cm.DEFAULT_MODEL,
             with_tags=self.tags_var.get(),

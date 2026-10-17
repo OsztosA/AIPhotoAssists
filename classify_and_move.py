@@ -7,6 +7,7 @@ import concurrent.futures
 import threading
 import time
 
+from datetime import datetime
 from typing import Callable, Optional
 from JpegImage import JpegImage
 from LLM import LLM
@@ -99,6 +100,42 @@ def parse_score_and_tags(response: str) -> Optional[dict]:
     if score is None and not useless:
         return None
     return {"score": score, "tags": tags, "useless": useless}
+
+DEFAULT_RENAME_PATTERN = "YYYY.MM.DD HH24.MI.SS - %NAME%"
+_PATTERN_TOKEN = re.compile(r"(YYYY|MM|DD|HH24|MI|SS|%(?i:name)%)")  # %NAME% is case-insensitive
+_INVALID_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+
+
+def _safe_filename(text: str) -> str:
+    """Makes text valid in a Windows file name; ':' (from HH24:MI:SS) becomes '.', other illegal chars '_'."""
+    return _INVALID_FILENAME_CHARS.sub("_", text.replace(":", "."))
+
+
+def format_new_filename(pattern: str, taken: datetime, filename: str) -> str:
+    """
+    Builds the new file name from a pattern with the tokens YYYY, MM, DD, HH24, MI, SS (the EXIF capture time) and
+    %NAME% (the original name without extension, case-insensitive). The extension is kept. Characters that are not
+    allowed in file names are replaced (':' -> '.'), e.g. 'YYYY.MM.DD HH24.MI.SS - %NAME%' ->
+    '2014.03.01 11.48.00 - P1420703.JPG'.
+    A file that already follows the pattern keeps its original %name% part (so renaming twice does not stack dates).
+    """
+    stem, ext = os.path.splitext(filename)
+    parts = _PATTERN_TOKEN.split(pattern)  # literals at even indexes, tokens at odd indexes
+    parts[1::2] = ["%name%" if p.lower() == "%name%" else p for p in parts[1::2]]
+    tokens = parts[1::2]
+    if tokens.count("%name%") == 1:
+        digits = {"YYYY": r"\d{4}", "%name%": r"(?P<name>.+)"}
+        regex = "".join(re.escape(_safe_filename(p)) if i % 2 == 0 else digits.get(p, r"\d{2}")
+                        for i, p in enumerate(parts))
+        m = re.fullmatch(regex, stem)
+        if m:
+            stem = m.group("name")
+    values = {"YYYY": f"{taken.year:04d}", "MM": f"{taken.month:02d}", "DD": f"{taken.day:02d}",
+              "HH24": f"{taken.hour:02d}", "MI": f"{taken.minute:02d}", "SS": f"{taken.second:02d}",
+              "%name%": stem}
+    new_stem = _safe_filename("".join(values.get(p, p) if i % 2 else p for i, p in enumerate(parts))).strip()
+    return (new_stem or stem) + ext
+
 
 # Callback types used by the GUI (the CLI just prints)
 LogCallback = Callable[[str], None]
@@ -217,14 +254,16 @@ def process_single_image(original_path: str, root_path: str, output_directory: s
                          api_url: str = API_URL, model: str = DEFAULT_MODEL,
                          log: LogCallback = print, stop_event: Optional[threading.Event] = None,
                          with_tags: bool = True, on_start: Optional[StartCallback] = None,
-                         resize_percent: int = 100, tag_count: int = 5, copy_files: bool = False) -> dict:
+                         resize_percent: int = 100, tag_count: int = 5, copy_files: bool = False,
+                         rename_pattern: Optional[str] = None) -> dict:
     """
     Classifies a single image and moves it. Designed to be run in a thread pool.
     Returns a dict: {'path', 'status', 'score', 'dest', 'tags', 'useless'} where status is one of
     'moved', 'skipped', 'failed', 'cancelled' (score/dest may be None). Useless photos (screenshots, documents,
     short-term reminders...) are moved to the 'useless' folder instead of a score folder.
     With copy_files=True the originals stay in place and the files are copied instead ('moved' still means
-    'placed in the output folder').
+    'placed in the output folder'). With a rename_pattern the file is renamed using its EXIF capture date
+    (see format_new_filename); files without an EXIF date keep their name.
     """
     tags: list[str] = []
     useless = False
@@ -263,7 +302,14 @@ def process_single_image(original_path: str, root_path: str, output_directory: s
 
         # Create the full destination directory path: output/score (or useless)/relative_path
         dest_dir = os.path.join(output_directory, score_folder_name, relative_dir)
-        new_path = os.path.join(dest_dir, os.path.basename(original_path))
+        new_name = os.path.basename(original_path)
+        if rename_pattern:
+            taken = JpegImage(original_path).get_exif_datetime()
+            if taken is None:
+                log(f"  -> No EXIF date in {new_name}, keeping the original name.")
+            else:
+                new_name = format_new_filename(rename_pattern, taken, new_name)
+        new_path = os.path.join(dest_dir, new_name)
 
         if os.path.exists(new_path):
             log(f"Skipping move: '{new_path}' already exists.")
@@ -291,7 +337,8 @@ def run_classification(root_path: str, output_directory: str, max_workers: int =
                        on_result: Optional[ResultCallback] = None,
                        on_start: Optional[StartCallback] = None,
                        with_tags: bool = True, resize_percent: int = 100,
-                       tag_count: int = 5, copy_files: bool = False) -> Optional[dict]:
+                       tag_count: int = 5, copy_files: bool = False,
+                       rename_pattern: Optional[str] = None) -> Optional[dict]:
     """
     Core worker used by both CLI and GUI. Scans root_path, classifies and moves images using a
     thread pool. Reports progress through the optional `progress` callback with a dict containing:
@@ -350,7 +397,7 @@ def run_classification(root_path: str, output_directory: str, max_workers: int =
         future_to_path = {
             executor.submit(process_single_image, path, root_path, output_directory, dry_run,
                             api_url, model, log, stop_event, with_tags, on_start, resize_percent, tag_count,
-                            copy_files): path
+                            copy_files, rename_pattern): path
             for path in image_paths
         }
 
@@ -395,7 +442,7 @@ def run_classification(root_path: str, output_directory: str, max_workers: int =
 def process_images_in_directory(root_path: str, output_directory: str, max_workers: int = 5,
                                 dry_run: bool = False, api_url: str = API_URL, model: str = DEFAULT_MODEL,
                                 with_tags: bool = True, resize_percent: int = 100, tag_count: int = 5,
-                                copy_files: bool = False):
+                                copy_files: bool = False, rename_pattern: Optional[str] = None):
     """CLI wrapper around run_classification that shows a single-line progress bar."""
 
     def cli_progress(s: dict):
@@ -412,7 +459,8 @@ def process_images_in_directory(root_path: str, output_directory: str, max_worke
 
     run_classification(root_path, output_directory, max_workers, dry_run, api_url, model,
                        log=lambda m: print(f"\n{m}"), progress=cli_progress, with_tags=with_tags,
-                       resize_percent=resize_percent, tag_count=tag_count, copy_files=copy_files)
+                       resize_percent=resize_percent, tag_count=tag_count, copy_files=copy_files,
+                       rename_pattern=rename_pattern)
 
 
 if __name__ == "__main__":
@@ -469,6 +517,16 @@ if __name__ == "__main__":
         help="Copy the images to the output directory instead of moving them (originals are kept)."
     )
     parser.add_argument(
+        "--rename",
+        dest="rename_pattern",
+        nargs="?",
+        const=DEFAULT_RENAME_PATTERN,
+        default=None,
+        metavar="PATTERN",
+        help=f"Rename the files using their EXIF date. Tokens: YYYY MM DD HH24 MI SS %%NAME%%. "
+             f"Without a value the pattern is '{DEFAULT_RENAME_PATTERN.replace('%', '%%')}'."
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Run the script without moving any files. Prints the actions that would be taken."
@@ -476,4 +534,4 @@ if __name__ == "__main__":
     args = parser.parse_args()
     process_images_in_directory(args.directory, args.output_directory, args.workers, args.dry_run,
                                 args.api_url, args.model, not args.no_tags, args.resize, max(1, args.tag_count),
-                                args.copy_files)
+                                args.copy_files, args.rename_pattern)

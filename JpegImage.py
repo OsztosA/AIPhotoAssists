@@ -1,6 +1,8 @@
 import base64
 import io
 import os
+from datetime import datetime
+from typing import Optional
 
 import piexif
 from PIL import Image
@@ -27,6 +29,27 @@ class JpegImage:
         except (IOError, OSError) as e:
             print(f"Error reading image file {self.path}: {e}")
             return None
+
+    def get_exif_datetime(self) -> Optional[datetime]:
+        """The capture date from EXIF (DateTimeOriginal, then DateTimeDigitized, then DateTime), or None."""
+        try:
+            exif_data = piexif.load(self.path)
+        except Exception:
+            return None
+        candidates = (
+            exif_data.get("Exif", {}).get(piexif.ExifIFD.DateTimeOriginal),
+            exif_data.get("Exif", {}).get(piexif.ExifIFD.DateTimeDigitized),
+            exif_data.get("0th", {}).get(piexif.ImageIFD.DateTime),
+        )
+        for raw in candidates:
+            if not raw:
+                continue
+            try:
+                text = raw.decode("ascii", errors="ignore") if isinstance(raw, bytes) else str(raw)
+                return datetime.strptime(text.strip("\x00 "), "%Y:%m:%d %H:%M:%S")
+            except ValueError:
+                continue  # empty / zeroed / malformed value, try the next tag
+        return None
 
     def has_existing_tags(self):
         try:
