@@ -18,7 +18,12 @@ IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.gif', '.bmp')
 API_URL = "http://localhost:1234/v1/chat/completions"
 DEFAULT_MODEL = "local-model"
 PROMPT = """You are an expert photo editor helping to cull a large personal photo library.
-Rate the overall quality and keep-worthiness of the attached photo as a single integer from 0 to 100.
+First decide whether the photo is USELESS: not worth keeping forever because it has no lasting or emotional value.
+Typical useless photos: screenshots, photos of documents, receipts, tickets, whiteboards, labels, price tags, parking spots,
+notes-to-self, product or screen photos taken only to remember something for a short period, memes, and similar utility shots.
+A photo of people, family, pets, travel, nature or events is NOT useless, even if it is technically poor (just give it a low score).
+If the photo is useless, it is not rated.
+Otherwise rate the overall quality and keep-worthiness of the attached photo as a single integer from 0 to 100.
 
 Evaluate these criteria:
 1. Technical quality (about 40%): sharpness and correct focus on the subject, absence of motion blur and camera shake, correct exposure (no blown highlights or crushed shadows), natural colors, low noise.
@@ -36,13 +41,16 @@ Scoring guide:
 Be critical and use the full range; do not give every photo a score in the middle.
 """
 
+USELESS_CATEGORY = "useless"  # name of the output folder for useless photos
+
 PROMPT_SCORE_ONLY = PROMPT + (
     "Respond with ONLY the integer score, with no text, explanation, punctuation, or symbols. "
-    "Example of a valid response: 72")
+    "Example of a valid response: 72. If the photo is useless, respond with ONLY the single word: USELESS")
 
 PROMPT_WITH_TAGS = PROMPT + """
 Additionally, describe the photo with exactly {tag_count} short, lowercase English tags (e.g. people, child, beach, sunset, birthday, food, landscape, blurry, indoor).
-Respond with ONLY a JSON object in exactly this format, with no other text: {"score": 72, "tags": ["family", "beach", "sunset"]}"""
+Respond with ONLY a JSON object in exactly this format, with no other text: {"useless": false, "score": 72, "tags": ["family", "beach", "sunset"]}
+For a useless photo set "useless" to true (the score is then ignored), e.g.: {"useless": true, "score": 0, "tags": ["screenshot", "text"]}"""
 
 
 def prompt_with_tags(tag_count: int) -> str:
@@ -50,8 +58,12 @@ def prompt_with_tags(tag_count: int) -> str:
 
 
 def parse_score_and_tags(response: str) -> Optional[dict]:
-    """Parses either a bare number or the JSON reply of PROMPT_WITH_TAGS into {'score': int, 'tags': [str]}."""
+    """
+    Parses either a bare number / the word USELESS, or the JSON reply of PROMPT_WITH_TAGS into
+    {'score': int | None, 'tags': [str], 'useless': bool}. The score is None for useless photos that were not rated.
+    """
     tags: list[str] = []
+    useless = False
     data = LLMResponseParser.extract_json_object(response)
     if data is not None:
         raw_tags = data.get("tags", data.get("keywords", []))
@@ -59,12 +71,17 @@ def parse_score_and_tags(response: str) -> Optional[dict]:
             raw_tags = re.split(r"[,;]", raw_tags)
         if isinstance(raw_tags, list):
             tags = [str(t).strip().lower() for t in raw_tags if str(t).strip()]
+        useless = str(data.get("useless", "")).strip().lower() in ("true", "yes", "1")
         score_text = str(data.get("score", ""))
     else:
+        useless = bool(re.fullmatch(r'\W*useless\W*', response, re.IGNORECASE)
+                       or re.search(r'"?useless"?\s*[:=]\s*(true|yes|1)\b', response, re.IGNORECASE))
         m = re.search(r'"?score"?\s*[:=]\s*(\d+)', response, re.IGNORECASE)
         score_text = m.group(1) if m else response
     score = LLMResponseParser.extract_first_int_in_range(score_text, 0, 100)
-    return None if score is None else {"score": score, "tags": tags}
+    if score is None and not useless:
+        return None
+    return {"score": score, "tags": tags, "useless": useless}
 
 # Callback types used by the GUI (the CLI just prints)
 LogCallback = Callable[[str], None]
@@ -148,7 +165,8 @@ def classify_image(image_path: str, api_url: str = API_URL, model: str = DEFAULT
                    resize_percent: int = 100, tag_count: int = 5) -> Optional[dict]:
     """
     Sends an image to the local LLM endpoint for classification.
-    Returns {'score': int, 'tags': [str]} (tags empty if not requested), or None on failure.
+    Returns {'score': int | None, 'tags': [str], 'useless': bool} (tags empty if not requested; score None for
+    useless photos that were not rated), or None on failure.
     """
     llm = LLM(api_url, model)
     try:
@@ -181,16 +199,21 @@ def process_single_image(original_path: str, root_path: str, output_directory: s
                          api_url: str = API_URL, model: str = DEFAULT_MODEL,
                          log: LogCallback = print, stop_event: Optional[threading.Event] = None,
                          with_tags: bool = True, on_start: Optional[StartCallback] = None,
-                         resize_percent: int = 100, tag_count: int = 5) -> dict:
+                         resize_percent: int = 100, tag_count: int = 5, copy_files: bool = False) -> dict:
     """
     Classifies a single image and moves it. Designed to be run in a thread pool.
-    Returns a dict: {'path', 'status', 'score', 'dest', 'tags'} where status is one of
-    'moved', 'skipped', 'failed', 'cancelled' (score/dest may be None).
+    Returns a dict: {'path', 'status', 'score', 'dest', 'tags', 'useless'} where status is one of
+    'moved', 'skipped', 'failed', 'cancelled' (score/dest may be None). Useless photos (screenshots, documents,
+    short-term reminders...) are moved to the 'useless' folder instead of a score folder.
+    With copy_files=True the originals stay in place and the files are copied instead ('moved' still means
+    'placed in the output folder').
     """
     tags: list[str] = []
+    useless = False
 
     def result(status: str, score: Optional[int] = None, dest: Optional[str] = None) -> dict:
-        return {"path": original_path, "status": status, "score": score, "dest": dest, "tags": tags}
+        return {"path": original_path, "status": status, "score": score, "dest": dest, "tags": tags,
+                "useless": useless}
 
     if stop_event is not None and stop_event.is_set():
         return result("cancelled")
@@ -208,17 +231,19 @@ def process_single_image(original_path: str, root_path: str, output_directory: s
     if classification is None:
         log(f"  -> Could not get score for {original_path}. Skipping.")
         return result("failed")
-    score, tags = classification["score"], classification["tags"]
+    score, tags, useless = classification["score"], classification["tags"], classification["useless"]
+    if useless:
+        score = None  # useless photos are not rated (keeps them out of the score histogram)
 
     try:
-        # Format score with leading zeros (e.g., 85 -> "085")
-        score_folder_name = f"{score:03d}"
+        # Format score with leading zeros (e.g., 85 -> "085"); useless photos go to their own folder
+        score_folder_name = USELESS_CATEGORY if useless else f"{score:03d}"
 
         # Determine the relative path from the original root
         dirpath = os.path.dirname(original_path)
         relative_dir = os.path.relpath(dirpath, root_path)
 
-        # Create the full destination directory path: output/score/relative_path
+        # Create the full destination directory path: output/score (or useless)/relative_path
         dest_dir = os.path.join(output_directory, score_folder_name, relative_dir)
         new_path = os.path.join(dest_dir, os.path.basename(original_path))
 
@@ -228,8 +253,12 @@ def process_single_image(original_path: str, root_path: str, output_directory: s
 
         if not dry_run:
             os.makedirs(dest_dir, exist_ok=True)
-            shutil.move(original_path, new_path)
-        verb = "Would move to" if dry_run else "Moved to"
+            if copy_files:
+                shutil.copy2(original_path, new_path)
+            else:
+                shutil.move(original_path, new_path)
+        action = "copy" if copy_files else "move"
+        verb = f"Would {action} to" if dry_run else ("Copied to" if copy_files else "Moved to")
         log(f"  -> {score_folder_name} - {verb}: {new_path}" + (f"  [tags: {', '.join(tags)}]" if tags else ""))
         return result("moved", score, new_path)
     except Exception as e:
@@ -244,11 +273,11 @@ def run_classification(root_path: str, output_directory: str, max_workers: int =
                        on_result: Optional[ResultCallback] = None,
                        on_start: Optional[StartCallback] = None,
                        with_tags: bool = True, resize_percent: int = 100,
-                       tag_count: int = 5) -> Optional[dict]:
+                       tag_count: int = 5, copy_files: bool = False) -> Optional[dict]:
     """
     Core worker used by both CLI and GUI. Scans root_path, classifies and moves images using a
     thread pool. Reports progress through the optional `progress` callback with a dict containing:
-    done, total, rate, avg_time, eta, counts (dict of moved/skipped/failed/cancelled), finished.
+    done, total, rate, avg_time, eta, counts (dict of moved/useless/skipped/failed/cancelled), finished.
     `on_result` is called once per image with the dict returned by process_single_image.
     Returns the final progress dict, or None if nothing was run.
     """
@@ -273,10 +302,10 @@ def run_classification(root_path: str, output_directory: str, max_workers: int =
         return None
 
     log(f"Found {total_images} images. Starting processing with {max_workers} workers "
-        f"(model: {model}, dry run: {dry_run})...")
+        f"(model: {model}, mode: {'copy' if copy_files else 'move'}, dry run: {dry_run})...")
     log(f"Output will be saved to: '{output_directory}'")
 
-    counts = {"moved": 0, "skipped": 0, "failed": 0, "cancelled": 0}
+    counts = {"moved": 0, "useless": 0, "skipped": 0, "failed": 0, "cancelled": 0}
     processed_count = 0
     start_time = time.time()
 
@@ -302,7 +331,8 @@ def run_classification(root_path: str, output_directory: str, max_workers: int =
         # Map futures to their original paths for better error reporting
         future_to_path = {
             executor.submit(process_single_image, path, root_path, output_directory, dry_run,
-                            api_url, model, log, stop_event, with_tags, on_start, resize_percent, tag_count): path
+                            api_url, model, log, stop_event, with_tags, on_start, resize_percent, tag_count,
+                            copy_files): path
             for path in image_paths
         }
 
@@ -312,10 +342,13 @@ def run_classification(root_path: str, output_directory: str, max_workers: int =
                 res = future.result()  # Raises any exceptions from the thread
             except Exception as e:
                 log(f"An error occurred while processing {original_path}: {e}")
-                res = {"path": original_path, "status": "failed", "score": None, "dest": None, "tags": []}
+                res = {"path": original_path, "status": "failed", "score": None, "dest": None, "tags": [],
+                       "useless": False}
 
             status = res["status"]
-            counts[status] = counts.get(status, 0) + 1
+            # useless photos that were moved are counted separately from the scored ones
+            key = "useless" if status == "moved" and res.get("useless") else status
+            counts[key] = counts.get(key, 0) + 1
             if status != "cancelled":
                 processed_count += 1
                 if on_result:
@@ -331,8 +364,9 @@ def run_classification(root_path: str, output_directory: str, max_workers: int =
     log("")
     log("--- Processing Summary ---" + (" (stopped by user)" if cancelled else ""))
     log(f"Images processed: {processed_count}/{total_images}")
-    log(f"Moved{' (dry run: would be moved)' if dry_run else ''}: {counts['moved']}, "
-        f"skipped: {counts['skipped']}, failed: {counts['failed']}")
+    done_word = "copied" if copy_files else "moved"
+    log(f"{done_word.capitalize()}{f' (dry run: would be {done_word})' if dry_run else ''}: {counts['moved']}, "
+        f"useless: {counts['useless']}, skipped: {counts['skipped']}, failed: {counts['failed']}")
     log(f"Total time taken: {stats['elapsed']:.2f} seconds")
     log(f"Average processing rate: {stats['rate']:.2f} images/sec")
     log(f"Average time per image: {stats['avg_time']:.2f} seconds")
@@ -342,7 +376,8 @@ def run_classification(root_path: str, output_directory: str, max_workers: int =
 
 def process_images_in_directory(root_path: str, output_directory: str, max_workers: int = 5,
                                 dry_run: bool = False, api_url: str = API_URL, model: str = DEFAULT_MODEL,
-                                with_tags: bool = True, resize_percent: int = 100, tag_count: int = 5):
+                                with_tags: bool = True, resize_percent: int = 100, tag_count: int = 5,
+                                copy_files: bool = False):
     """CLI wrapper around run_classification that shows a single-line progress bar."""
 
     def cli_progress(s: dict):
@@ -350,6 +385,7 @@ def process_images_in_directory(root_path: str, output_directory: str, max_worke
             return
         message = (
             f"Progress: {s['done']}/{s['total']} | "
+            f"Useless: {s['counts'].get('useless', 0)} | "
             f"Avg: {s['rate']:.2f} img/s | "
             f"Avg time/img: {s['avg_time']:.2f}s | "
             f"ETA: {_format_seconds(s['eta'])}"
@@ -358,7 +394,7 @@ def process_images_in_directory(root_path: str, output_directory: str, max_worke
 
     run_classification(root_path, output_directory, max_workers, dry_run, api_url, model,
                        log=lambda m: print(f"\n{m}"), progress=cli_progress, with_tags=with_tags,
-                       resize_percent=resize_percent, tag_count=tag_count)
+                       resize_percent=resize_percent, tag_count=tag_count, copy_files=copy_files)
 
 
 if __name__ == "__main__":
@@ -409,10 +445,17 @@ if __name__ == "__main__":
         help="Number of tags to ask the LLM for. Default is 5."
     )
     parser.add_argument(
+        "--copy",
+        dest="copy_files",
+        action="store_true",
+        help="Copy the images to the output directory instead of moving them (originals are kept)."
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Run the script without moving any files. Prints the actions that would be taken."
     )
     args = parser.parse_args()
     process_images_in_directory(args.directory, args.output_directory, args.workers, args.dry_run,
-                                args.api_url, args.model, not args.no_tags, args.resize, max(1, args.tag_count))
+                                args.api_url, args.model, not args.no_tags, args.resize, max(1, args.tag_count),
+                                args.copy_files)

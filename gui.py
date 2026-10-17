@@ -45,6 +45,7 @@ class App(tk.Tk):
         self.model_var = tk.StringVar(value=s.get("model", cm.DEFAULT_MODEL))
         self.workers_var = tk.IntVar(value=s.get("workers", 5))
         self.dry_run_var = tk.BooleanVar(value=s.get("dry_run", True))  # safe default
+        self.mode_var = tk.StringVar(value=s.get("mode", "copy") if s.get("mode") in ("copy", "move") else "copy")
         self.tags_var = tk.BooleanVar(value=s.get("with_tags", True))
         self.resize_var = tk.IntVar(value=min(100, max(25, int(s.get("resize_percent", 100)))))
         self.tag_count_var = tk.IntVar(value=max(1, int(s.get("tag_count", 5))))
@@ -63,7 +64,7 @@ class App(tk.Tk):
         # Persist every setting as soon as it changes (debounced), not only on Start / close
         self._save_job = None
         for var in (self.source_var, self.target_var, self.api_var, self.model_var,
-                    self.workers_var, self.dry_run_var, self.tags_var,
+                    self.workers_var, self.dry_run_var, self.mode_var, self.tags_var,
                     self.resize_var, self.tag_count_var):
             var.trace_add("write", lambda *_: self._schedule_save())
         self.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -104,10 +105,19 @@ class App(tk.Tk):
         self.detect_btn = ttk.Button(model, text="Detect", command=self.detect_limit)
         self.detect_btn.grid(row=3, column=2, sticky="ew", **pad)
 
+        # Copy / move
+        fileop = ttk.LabelFrame(root, text="File operation", padding=8)
+        fileop.pack(fill="x", **pad)
+        ttk.Style(self).configure("Danger.TRadiobutton", foreground="#c62828")
+        ttk.Radiobutton(fileop, text="Copy (originals are kept)", value="copy",
+                        variable=self.mode_var).pack(side="left", **pad)
+        ttk.Radiobutton(fileop, text="\u26a0 Move (originals are removed!)", value="move",
+                        variable=self.mode_var, style="Danger.TRadiobutton").pack(side="left", **pad)
+
         # Options
         opts = ttk.LabelFrame(root, text="Options", padding=8)
         opts.pack(fill="x", **pad)
-        ttk.Checkbutton(opts, text="Dry run (don't move any files)", variable=self.dry_run_var).pack(side="left", **pad)
+        ttk.Checkbutton(opts, text="Dry run (don't copy/move any files)", variable=self.dry_run_var).pack(side="left", **pad)
         ttk.Checkbutton(opts, text="Ask LLM for tags", variable=self.tags_var).pack(side="left", **pad)
         ttk.Label(opts, text="Workers:").pack(side="left", padx=(24, 4))
         self.workers_spin = ttk.Spinbox(opts, from_=1, to=32, width=5, textvariable=self.workers_var)
@@ -216,8 +226,8 @@ class App(tk.Tk):
         frame = ttk.Frame(notebook, padding=4)
         notebook.add(frame, text="Results")
 
-        # Score distribution (10 buckets: 0-9, 10-19, ... 90-100)
-        self.score_counts = [0] * 10
+        # Score distribution (10 buckets: 0-9, 10-19, ... 90-100) plus an 11th bucket for useless photos
+        self.score_counts = [0] * 11
         self.hist = tk.Canvas(frame, height=90, highlightthickness=0)
         self.hist.pack(fill="x", pady=(0, 6))
         self.hist.bind("<Configure>", lambda e: self._draw_histogram())
@@ -233,6 +243,7 @@ class App(tk.Tk):
         self.tree.tag_configure("good", foreground="#1a7f37")
         self.tree.tag_configure("bad", foreground="#c62828")
         self.tree.tag_configure("failed", foreground="#9e9e9e")
+        self.tree.tag_configure("useless", foreground="#757575")
         ysb = ttk.Scrollbar(frame, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=ysb.set)
         ysb.pack(side="right", fill="y")
@@ -244,24 +255,31 @@ class App(tk.Tk):
     def _clear_results(self):
         self.tree.delete(*self.tree.get_children())
         self._result_paths.clear()
-        self.score_counts = [0] * 10
+        self.score_counts = [0] * 11
         self._draw_histogram()
 
     def _add_result(self, r: dict):
         score, status = r["score"], r["status"]
         if status == "moved":
-            label = "would move" if self.dry_run_var.get() else "moved"
+            verb = "copy" if self.mode_var.get() == "copy" else "move"
+            label = f"would {verb}" if self.dry_run_var.get() else ("copied" if verb == "copy" else "moved")
         else:
             label = status
-        tag = "failed" if status in ("failed", "skipped") and score is None else (
+        if r.get("useless"):
+            label += " (useless)"
+        useless = bool(r.get("useless"))
+        tag = "useless" if useless else "failed" if status in ("failed", "skipped") and score is None else (
             "good" if score is not None and score >= 70 else "bad" if score is not None and score < 40 else "")
         item = self.tree.insert("", "end", values=(
-            os.path.basename(r["path"]), "" if score is None else score, ", ".join(r.get("tags") or []), label,
+            os.path.basename(r["path"]), "useless" if useless else "" if score is None else score, ", ".join(r.get("tags") or []), label,
             r["dest"] or r["path"]),
             tags=(tag,) if tag else ())
         dest = r["dest"]
         self._result_paths[item] = dest if dest and os.path.exists(dest) else r["path"]
-        if score is not None:
+        if useless:
+            self.score_counts[10] += 1
+            self._draw_histogram()
+        elif score is not None:
             self.score_counts[min(score // 10, 9)] += 1
             self._draw_histogram()
         self.tree.see(item)
@@ -273,23 +291,23 @@ class App(tk.Tk):
         if w < 50:
             return
         mx = max(self.score_counts) or 1
-        slot = (w - 10) / 10
+        slot = (w - 10) / 11
         base = h - 16
         for i, n in enumerate(self.score_counts):
             x0 = 5 + i * slot + 4
             x1 = 5 + (i + 1) * slot - 4
             bar_h = (base - 14) * n / mx
-            color = "#c62828" if i < 4 else "#f9a825" if i < 7 else "#1a7f37"
+            color = "#9e9e9e" if i == 10 else "#c62828" if i < 4 else "#f9a825" if i < 7 else "#1a7f37"
             c.create_rectangle(x0, base - bar_h, x1, base, fill=color, outline="")
             if n:
                 c.create_text((x0 + x1) / 2, base - bar_h - 7, text=str(n), font=("Segoe UI", 8))
-            label = f"{i * 10}-{i * 10 + 9}" if i < 9 else "90-100"
+            label = "useless" if i == 10 else f"{i * 10}-{i * 10 + 9}" if i < 9 else "90-100"
             c.create_text((x0 + x1) / 2, h - 7, text=label, font=("Segoe UI", 8))
 
     def _sort_tree(self, col):
         rows = [(self.tree.set(i, col), i) for i in self.tree.get_children("")]
         if col == "score":
-            key = lambda t: float(t[0]) if t[0] != "" else -1.0
+            key = lambda t: -2.0 if t[0] == "useless" else float(t[0]) if t[0] != "" else -1.0
         else:
             key = lambda t: t[0].lower()
         reverse = not self._sort_reverse.get(col, True)
@@ -352,7 +370,7 @@ class App(tk.Tk):
         data = {
             "source": self.source_var.get(), "target": self.target_var.get(),
             "api_url": self.api_var.get(), "api_urls": self.backend_urls, "model": self.model_var.get(),
-            "workers": self._workers(), "dry_run": self.dry_run_var.get(),
+            "workers": self._workers(), "dry_run": self.dry_run_var.get(), "mode": self.mode_var.get(),
             "with_tags": self.tags_var.get(),
             "resize_percent": self._resize_percent(), "tag_count": self._tag_count(),
         }
@@ -466,8 +484,9 @@ class App(tk.Tk):
             return
         if not self._is_vision_model_ok():
             return
-        if not self.dry_run_var.get() and not messagebox.askyesno(
-                "Move files?", "Dry run is OFF. Images will be MOVED from the source to the target folder.\n\nContinue?"):
+        if not self.dry_run_var.get() and self.mode_var.get() == "move" and not messagebox.askyesno(
+                "Move files?", "Dry run is OFF. Images will be MOVED from the source to the target folder "
+                               "(the originals are removed).\n\nContinue?"):
             return
 
         self._save_settings()
@@ -491,7 +510,8 @@ class App(tk.Tk):
 
         args = dict(
             root_path=source, output_directory=target, max_workers=self._workers(),
-            dry_run=self.dry_run_var.get(), api_url=self.api_var.get().strip(),
+            dry_run=self.dry_run_var.get(), copy_files=self.mode_var.get() == "copy",
+            api_url=self.api_var.get().strip(),
             model=self.model_var.get().strip() or cm.DEFAULT_MODEL,
             with_tags=self.tags_var.get(),
             resize_percent=self._resize_percent(), tag_count=self._tag_count(),
@@ -603,8 +623,9 @@ class App(tk.Tk):
             f"Rate: {s['rate']:.2f} img/s   |   Avg: {s['avg_time']:.2f} s/img   |   "
             f"Elapsed: {cm._format_seconds(s['elapsed'])}   |   ETA: {cm._format_seconds(s['eta'])}")
         c = s["counts"]
-        verb = "Would move" if self.dry_run_var.get() else "Moved"
-        self.counts_var.set(f"{verb}: {c['moved']}   Skipped: {c['skipped']}   Failed: {c['failed']}")
+        copy = self.mode_var.get() == "copy"
+        verb = ("Would copy" if copy else "Would move") if self.dry_run_var.get() else ("Copied" if copy else "Moved")
+        self.counts_var.set(f"{verb}: {c['moved']}   Useless: {c['useless']}   Skipped: {c['skipped']}   Failed: {c['failed']}")
 
     def _on_close(self):
         if self.worker and self.worker.is_alive():
