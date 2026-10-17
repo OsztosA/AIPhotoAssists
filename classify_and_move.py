@@ -14,10 +14,24 @@ from ResponseParser import LLMResponseParser
 # Supported image extensions
 IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.gif', '.bmp')
 API_URL = "http://localhost:1234/v1/chat/completions"
-PROMPT = ("act as a photo assistant and classify this image on a scale from 0 to 100 where 0 means a totally bad image, "
-          "out of focus, badly composed, "
-          "and 100 means a perfect, sharp well designed professional photo. "
-          "Important family photos should get larger score. Important! Respond with only the number, just one number!")
+PROMPT = """You are an expert photo editor helping to cull a large personal photo library.
+Rate the overall quality and keep-worthiness of the attached photo as a single integer from 0 to 100.
+
+Evaluate these criteria:
+1. Technical quality (about 40%): sharpness and correct focus on the subject, absence of motion blur and camera shake, correct exposure (no blown highlights or crushed shadows), natural colors, low noise.
+2. Composition (about 25%): framing, subject placement, balance, level horizon, no distracting elements or awkwardly cropped subjects.
+3. Subject and emotion (about 35%): photos of family members, friends, children, and meaningful moments or events (smiles, interaction, milestones, travel memories) are highly valuable. People should have open eyes and pleasant expressions. A technically imperfect photo of an important family moment still deserves a decent score.
+
+Scoring guide:
+- 0-10: unusable (black/blank frame, accidental shot, heavily blurred, pocket photo, finger over lens)
+- 11-30: poor (out of focus, badly exposed or badly composed, no meaningful content)
+- 31-50: mediocre (acceptable snapshot, forgettable or near-duplicate quality)
+- 51-70: good (sharp, decent composition, pleasant content)
+- 71-85: very good (strong composition, great light, or an important family/people moment)
+- 86-100: outstanding (professional-quality, or an irreplaceable family memory that is also well captured)
+
+Be critical and use the full range; do not give every photo a score in the middle.
+Respond with ONLY the integer score, with no text, explanation, punctuation, or symbols. Example of a valid response: 72"""
 
 
 def _format_seconds(seconds: float) -> str:
