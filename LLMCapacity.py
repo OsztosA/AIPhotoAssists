@@ -9,11 +9,15 @@ from typing import Callable, Optional
 
 import requests
 
+import LLMBackend
+
 _KEY_RE = re.compile(r"parallel|concurren|n_slots|total_slots", re.IGNORECASE)
 
 
 def _base_url(api_url: str) -> str:
     """'http://host:1234/v1/chat/completions' -> 'http://host:1234'"""
+    if LLMBackend.is_ollama_url(api_url):
+        return LLMBackend.ollama_base_url(api_url)
     return re.split(r"/v1(/|$)", api_url.rstrip("/"))[0]
 
 
@@ -39,6 +43,8 @@ def _find_int(obj, depth: int = 0) -> Optional[int]:
 
 def read_declared_limit(api_url: str, model: str, log: Callable[[str], None] = lambda m: None) -> Optional[tuple[int, str]]:
     """Asks the server (and the LM Studio CLI) whether it declares a parallel-request limit."""
+    if LLMBackend.is_ollama_url(api_url):
+        return None  # Ollama's OLLAMA_NUM_PARALLEL is not exposed through its API -> measure instead
     base = _base_url(api_url)
     probes = [(f"{base}/api/v0/models/{model}", "LM Studio model info"), (f"{base}/props", "llama.cpp /props")]
     for url, label in probes:
@@ -67,12 +73,9 @@ def read_declared_limit(api_url: str, model: str, log: Callable[[str], None] = l
 
 
 def _timed_request(api_url: str, model: str, timeout: float) -> float:
-    payload = {
-        "model": model,
-        "messages": [{"role": "user", "content": "Count from 1 to 40 separated by commas. Output only the numbers."}],
-        "max_tokens": 64,
-        "temperature": 0,
-    }
+    payload = LLMBackend.build_chat_payload(
+        api_url, model, "Count from 1 to 40 separated by commas. Output only the numbers.",
+        max_tokens=64, temperature=0)
     start = time.time()
     r = requests.post(api_url, json=payload, timeout=timeout)
     r.raise_for_status()

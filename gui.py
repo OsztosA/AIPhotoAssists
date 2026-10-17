@@ -7,6 +7,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 import classify_and_move as cm
+import LLMBackend
 import LLMCapacity
 
 try:  # Pillow is optional: without it the in-progress preview is simply disabled
@@ -33,6 +34,11 @@ class App(tk.Tk):
         self.source_var = tk.StringVar(value=s.get("source", ""))
         self.target_var = tk.StringVar(value=s.get("target", ""))
         self.api_var = tk.StringVar(value=s.get("api_url", cm.API_URL))
+        # The backend (OpenAI-compatible vs. Ollama) follows from the URL; remember one URL per backend
+        self.backend_var = tk.StringVar(value=LLMBackend.backend_for_url(self.api_var.get()))
+        self.backend_urls = dict(LLMBackend.DEFAULT_URLS)
+        self.backend_urls.update({k: v for k, v in (s.get("api_urls") or {}).items() if k in self.backend_urls})
+        self.backend_urls[self.backend_var.get()] = self.api_var.get()
         self.model_var = tk.StringVar(value=s.get("model", cm.DEFAULT_MODEL))
         self.workers_var = tk.IntVar(value=s.get("workers", 5))
         self.dry_run_var = tk.BooleanVar(value=s.get("dry_run", True))  # safe default
@@ -46,6 +52,7 @@ class App(tk.Tk):
         self.counts_var = tk.StringVar(value="")
 
         self._build_ui()
+        self.api_var.trace_add("write", lambda *_: self._on_url_changed())
         self.api_var.trace_add("write", lambda *_: self._invalidate_limit())
         self.model_var.trace_add("write", lambda *_: self._invalidate_limit())
         # Persist every setting as soon as it changes (debounced), not only on Start / close
@@ -74,17 +81,22 @@ class App(tk.Tk):
         model = ttk.LabelFrame(root, text="Model", padding=8)
         model.pack(fill="x", **pad)
         model.columnconfigure(1, weight=1)
-        ttk.Label(model, text="API URL:").grid(row=0, column=0, sticky="w", **pad)
-        ttk.Entry(model, textvariable=self.api_var).grid(row=0, column=1, columnspan=2, sticky="ew", **pad)
-        ttk.Label(model, text="Model:").grid(row=1, column=0, sticky="w", **pad)
+        ttk.Label(model, text="Backend:").grid(row=0, column=0, sticky="w", **pad)
+        backend_combo = ttk.Combobox(model, textvariable=self.backend_var, values=list(LLMBackend.BACKENDS),
+                                     state="readonly")
+        backend_combo.grid(row=0, column=1, sticky="ew", **pad)
+        backend_combo.bind("<<ComboboxSelected>>", lambda _e: self._on_backend_selected())
+        ttk.Label(model, text="API URL:").grid(row=1, column=0, sticky="w", **pad)
+        ttk.Entry(model, textvariable=self.api_var).grid(row=1, column=1, columnspan=2, sticky="ew", **pad)
+        ttk.Label(model, text="Model:").grid(row=2, column=0, sticky="w", **pad)
         self.model_combo = ttk.Combobox(model, textvariable=self.model_var, values=[cm.DEFAULT_MODEL])
-        self.model_combo.grid(row=1, column=1, sticky="ew", **pad)
+        self.model_combo.grid(row=2, column=1, sticky="ew", **pad)
         self.refresh_btn = ttk.Button(model, text="Refresh models", command=self.refresh_models)
-        self.refresh_btn.grid(row=1, column=2, **pad)
-        ttk.Label(model, text="Parallel requests:").grid(row=2, column=0, sticky="w", **pad)
-        ttk.Label(model, textvariable=self.limit_var).grid(row=2, column=1, sticky="w", **pad)
+        self.refresh_btn.grid(row=2, column=2, **pad)
+        ttk.Label(model, text="Parallel requests:").grid(row=3, column=0, sticky="w", **pad)
+        ttk.Label(model, textvariable=self.limit_var).grid(row=3, column=1, sticky="w", **pad)
         self.detect_btn = ttk.Button(model, text="Detect", command=self.detect_limit)
-        self.detect_btn.grid(row=2, column=2, sticky="ew", **pad)
+        self.detect_btn.grid(row=3, column=2, sticky="ew", **pad)
 
         # Options
         opts = ttk.LabelFrame(root, text="Options", padding=8)
@@ -291,6 +303,22 @@ class App(tk.Tk):
         if path:
             var.set(os.path.normpath(path))
 
+    # ---------- Backend ----------
+    def _on_url_changed(self):
+        """Keeps the backend selector and the per-backend URL memory in sync with a hand-edited URL."""
+        url = self.api_var.get()
+        backend = LLMBackend.backend_for_url(url)
+        self.backend_urls[backend] = url
+        if self.backend_var.get() != backend:
+            self.backend_var.set(backend)
+
+    def _on_backend_selected(self):
+        """User switched the backend: restore that backend's URL and reload its model list."""
+        self.api_var.set(self.backend_urls[self.backend_var.get()])
+        self.model_combo.configure(values=[])
+        self.model_types = {}
+        self.refresh_models()
+
     # ---------- Settings ----------
     def _load_settings(self) -> dict:
         try:
@@ -305,7 +333,7 @@ class App(tk.Tk):
             self._save_job = None
         data = {
             "source": self.source_var.get(), "target": self.target_var.get(),
-            "api_url": self.api_var.get(), "model": self.model_var.get(),
+            "api_url": self.api_var.get(), "api_urls": self.backend_urls, "model": self.model_var.get(),
             "workers": self._workers(), "dry_run": self.dry_run_var.get(),
             "with_tags": self.tags_var.get(),
         }

@@ -10,6 +10,7 @@ import time
 from typing import Callable, Optional
 from JpegImage import JpegImage
 from LLM import LLM
+import LLMBackend
 from ResponseParser import LLMResponseParser
 
 # Supported image extensions
@@ -95,6 +96,8 @@ def fetch_model_infos(api_url: str = API_URL, timeout: float = 5) -> list[dict]:
     Returns [{'id': ..., 'type': 'vlm'|'llm'|'embeddings'|None}, ...]. Uses LM Studio's /api/v0/models, which
     reports the model type (only 'vlm' models accept images), and falls back to the plain OpenAI /v1/models.
     """
+    if LLMBackend.is_ollama_url(api_url):
+        return _fetch_ollama_model_infos(api_url, timeout)
     models_url = models_url_from_api_url(api_url)
     try:
         r = requests.get(models_url.replace("/v1/models", "/api/v0/models"), timeout=timeout)
@@ -104,6 +107,36 @@ def fetch_model_infos(api_url: str = API_URL, timeout: float = 5) -> list[dict]:
         r = requests.get(models_url, timeout=timeout)
         r.raise_for_status()
         return [{"id": m["id"], "type": None} for m in r.json().get("data", []) if "id" in m]
+
+
+def _fetch_ollama_model_infos(api_url: str, timeout: float = 5) -> list[dict]:
+    """
+    Lists the models installed in Ollama (/api/tags). The type is derived from the capabilities reported by
+    /api/show ('vision' -> 'vlm', 'embedding' -> 'embeddings', otherwise 'llm'); None for older servers that
+    do not report capabilities.
+    """
+    base = LLMBackend.ollama_base_url(api_url)
+    r = requests.get(f"{base}/api/tags", timeout=timeout)
+    r.raise_for_status()
+    names = [m.get("name") or m.get("model") for m in r.json().get("models", [])]
+    names = [n for n in names if n]
+
+    def model_type(name: str) -> Optional[str]:
+        try:
+            resp = requests.post(f"{base}/api/show", json={"model": name}, timeout=timeout)
+            resp.raise_for_status()
+            caps = resp.json().get("capabilities")
+        except (requests.RequestException, ValueError):
+            return None
+        if not caps:
+            return None
+        return "vlm" if "vision" in caps else "embeddings" if "embedding" in caps else "llm"
+
+    if not names:
+        return []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(names))) as ex:
+        types = list(ex.map(model_type, names))
+    return [{"id": n, "type": t} for n, t in zip(names, types)]
 
 
 def classify_image(image_path: str, api_url: str = API_URL, model: str = DEFAULT_MODEL,
