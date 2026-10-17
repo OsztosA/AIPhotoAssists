@@ -36,24 +36,65 @@ This script recursively scans a directory for images, asks an LLM to rate each i
 
 ### Installation
 ```shell   
-pip install requests
+pip install requests pillow
 ```
 
 ### Usage
 Run the script from your terminal, providing the source directory and a destination directory.
 ```shell
-python classify_and_move.py <source_directory> --output <destination_directory> [--workers <number>]
+python classify_and_move.py <source_directory> --output <destination_directory> [--workers <number>] [--resize <25-100>] [--tag-count <number>]
 ```
 
 #### Arguments
 - `source_directory`: The root directory to search for images.
 - `-o, --output`: (Required) The base directory where the scored folder structure will be created.
 - `-w, --workers`: (Optional) The number of concurrent threads to use. Defaults to 5.
+- `-m, --model`: (Optional) Model name sent to the API. Defaults to `local-model`.
+- `--api-url`: (Optional) Chat completions endpoint of the LLM server.
+- `--no-tags`: (Optional) Only ask the LLM for a score, not for tags.
+- `--resize`: (Optional) Resize each image to this percentage (25-100) before sending it to the LLM. Smaller images are faster to process. Defaults to 100 (original file, unchanged).
+- `--tag-count`: (Optional) The number of tags the LLM is asked to generate. Defaults to 5.
+- `--dry-run`: (Optional) Do not move any files.
+
+See [Graphical interface](#graphical-interface-guipy) for a GUI with the same options (including the image size slider and the number of tags).
 
 #### Example
 ```shell
 python classify_and_move.py "C:\Users\MyUser\Pictures" --output "D:\SortedPics" --workers 5
+
+# Send images at 50% size and ask for 8 tags
+python classify_and_move.py "C:\Users\MyUser\Pictures" --output "D:\SortedPics" --resize 50 --tag-count 8
 ```
+
+---
+
+## Graphical interface `gui.py`
+A Tkinter front end for `classify_and_move.py`: configure everything in one window, run it and watch the progress live. It uses the same code as the command line tool.
+
+### Running
+```shell
+pip install requests pillow
+python gui.py
+```
+Tkinter ships with the standard Python installer. Pillow is optional but needed for the live image previews.
+
+### Using it
+1. **Folders**: choose the *Source* folder (searched recursively) and the *Target* folder (the scored folder structure is created there). They must be different.
+2. **Model**: pick the *Backend* (OpenAI-compatible such as LM Studio, or Ollama), check the *API URL* and select the *Model* (click *Refresh models* to reload the list; only vision models can be used). *Detect* finds the maximum number of parallel requests the model supports; it also runs automatically on Start.
+3. **Options**:
+   - *Dry run*: nothing is moved, the results are only shown. It is on by default; when it is off you are asked to confirm before files are moved.
+   - *Ask LLM for tags*: also request descriptive tags, shown in the Results tab.
+   - *Workers*: number of parallel requests (limited to the detected maximum of the model).
+4. **LLM request**:
+   - *Tags to generate*: how many tags the LLM is asked for (default 5).
+   - *Image size sent to LLM*: slider from 25% to 100% (default 100%). The image is downscaled before it is sent, which speeds up processing and lowers memory use; 100% sends the original file.
+5. Press **Start**; **Stop** cancels the run after the in-flight requests finish.
+
+While running you see a progress bar with rate and ETA, thumbnails of the images being processed, and two tabs:
+- **Results**: a score histogram and a table (file, score, tags, result, destination). Click a column heading to sort, double-click a row to open the file.
+- **Log**: messages and errors.
+
+All settings are saved automatically to `gui_settings.json` next to the script and restored on the next start.
 
 ---
 
