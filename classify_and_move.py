@@ -321,6 +321,9 @@ def process_single_image(original_path: str, root_path: str, output_directory: s
                 shutil.copy2(original_path, new_path)
             else:
                 shutil.move(original_path, new_path)
+            if new_path.lower().endswith(('.jpg', '.jpeg')) and (score is not None or tags):
+                # Store the quality score as the first keyword ("Q:<score>"), followed by the LLM tags
+                JpegImage(new_path).write_exif_tags({"keywords": tags}, score=score)
         action = "copy" if copy_files else "move"
         verb = f"Would {action} to" if dry_run else ("Copied to" if copy_files else "Moved to")
         log(f"  -> {score_folder_name} - {verb}: {new_path}" + (f"  [tags: {', '.join(tags)}]" if tags else ""))

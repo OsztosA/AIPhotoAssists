@@ -64,28 +64,33 @@ class JpegImage:
             # If there's any error reading EXIF (e.g., no EXIF data), assume no tags.
             return False
 
-    def write_exif_tags(self, tags, dry_run=False):
+    def write_exif_tags(self, tags, dry_run=False, score: Optional[int] = None):
         """
         Writes the given tags to the image's EXIF data, preserving the original
-        file modification time.
+        file modification time and any other existing EXIF data.
+        If score is given, it is stored as the first keyword in the form "Q:<score>"
+        (an older "Q:" keyword is replaced).
         """
         try:
+            keywords = [k for k in tags.get("keywords", []) if not str(k).startswith("Q:")]
+            if score is not None:
+                keywords.insert(0, f"Q:{score}")
             # piexif requires keywords to be a semicolon-separated string, encoded in UTF-16LE.
-            keywords_str = ";".join(tags.get("keywords", []))
+            keywords_str = ";".join(keywords)
             # The bytes must be null-terminated.
             keywords_bytes = keywords_str.encode('utf-16le') + b'\x00\x00'
 
-            exif_dict = {
-                "0th": {
-                    piexif.ImageIFD.ImageDescription: tags.get("description", "").encode('utf-8')
-                },
-                "Exif": {},
-                "GPS": {},
-                "1st": {},
-                "thumbnail": None
-            }
+            # Keep existing EXIF (capture date, camera, ...) instead of replacing it
+            try:
+                exif_dict = piexif.load(self.path)
+            except Exception:
+                exif_dict = {"0th": {}, "Exif": {}, "GPS": {}, "1st": {}, "thumbnail": None}
+
+            if "description" in tags:
+                exif_dict["0th"][piexif.ImageIFD.ImageDescription] = tags.get("description", "").encode('utf-8')
             # Windows specific tags for Title and Keywords
-            exif_dict["0th"][piexif.ImageIFD.XPTitle] = tags.get("title", "").encode('utf-16le') + b'\x00\x00'
+            if "title" in tags:
+                exif_dict["0th"][piexif.ImageIFD.XPTitle] = tags.get("title", "").encode('utf-16le') + b'\x00\x00'
             exif_dict["0th"][piexif.ImageIFD.XPKeywords] = keywords_bytes
 
             exif_bytes = piexif.dump(exif_dict)
