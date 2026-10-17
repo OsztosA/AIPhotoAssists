@@ -44,8 +44,8 @@ Be critical and use the full range; do not give every photo a score in the middl
 USELESS_CATEGORY = "useless"  # name of the output folder for useless photos
 
 PROMPT_SCORE_ONLY = PROMPT + (
-    "Respond with ONLY the integer score, with no text, explanation, punctuation, or symbols. "
-    "Example of a valid response: 72. If the photo is useless, respond with ONLY the single word: USELESS")
+    'Respond with ONLY a JSON object in exactly this format, with no other text: {"useless": false, "score": 72}\n'
+    'For a useless photo set "useless" to true (the score is then ignored), e.g.: {"useless": true, "score": 0}')
 
 PROMPT_WITH_TAGS = PROMPT + """
 Additionally, describe the photo with exactly {tag_count} short, lowercase English tags (e.g. people, child, beach, sunset, birthday, food, landscape, blurry, indoor).
@@ -55,6 +55,23 @@ For a useless photo set "useless" to true (the score is then ignored), e.g.: {"u
 
 def prompt_with_tags(tag_count: int) -> str:
     return PROMPT_WITH_TAGS.replace("{tag_count}", str(tag_count))
+
+
+def response_schema(with_tags: bool, tag_count: int = 5) -> dict:
+    """
+    JSON schema for grammar-constrained decoding: the server can only produce a reply of exactly this shape.
+    'useless' comes first so the model decides it before scoring.
+    """
+    properties: dict = {
+        "useless": {"type": "boolean"},
+        "score": {"type": "integer", "minimum": 0, "maximum": 100},
+    }
+    required = ["useless", "score"]
+    if with_tags:
+        properties["tags"] = {"type": "array", "items": {"type": "string"},
+                              "minItems": tag_count, "maxItems": tag_count}
+        required.append("tags")
+    return {"type": "object", "properties": properties, "required": required, "additionalProperties": False}
 
 
 def parse_score_and_tags(response: str) -> Optional[dict]:
@@ -175,7 +192,8 @@ def classify_image(image_path: str, api_url: str = API_URL, model: str = DEFAULT
             return None
         jpeg_image = JpegImage(image_path)
         response = llm.call_llm(jpeg_image, prompt_with_tags(tag_count) if with_tags else PROMPT_SCORE_ONLY,
-                            resize_percent)
+                                resize_percent, response_schema=response_schema(with_tags, tag_count),
+                                temperature=0.0, schema_name="photo_rating")
         if response is None:
             return None
 

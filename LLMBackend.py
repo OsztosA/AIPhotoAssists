@@ -30,8 +30,14 @@ def ollama_base_url(api_url: str) -> str:
 
 
 def build_chat_payload(api_url: str, model: str, prompt: str, image_b64: str | None = None,
-                       max_tokens: int | None = None, temperature: float | None = None) -> dict:
-    """Builds the request body for a single user message (optionally with one JPEG image)."""
+                       max_tokens: int | None = None, temperature: float | None = None,
+                       response_schema: dict | None = None, schema_name: str = "response") -> dict:
+    """
+    Builds the request body for a single user message (optionally with one JPEG image).
+    With response_schema (a JSON schema) the server constrains decoding to it (grammar-constrained decoding):
+    Ollama via the top-level "format" field, OpenAI-compatible servers (LM Studio, llama.cpp, ...) via
+    "response_format": {"type": "json_schema", ...}.
+    """
     if is_ollama_url(api_url):
         message: dict = {"role": "user", "content": prompt}
         if image_b64:
@@ -44,6 +50,8 @@ def build_chat_payload(api_url: str, model: str, prompt: str, image_b64: str | N
             options["temperature"] = temperature
         if options:
             payload["options"] = options
+        if response_schema is not None:
+            payload["format"] = response_schema
         return payload
 
     content: object = prompt
@@ -57,6 +65,11 @@ def build_chat_payload(api_url: str, model: str, prompt: str, image_b64: str | N
         payload["max_tokens"] = max_tokens
     if temperature is not None:
         payload["temperature"] = temperature
+    if response_schema is not None:
+        payload["response_format"] = {
+            "type": "json_schema",
+            "json_schema": {"name": schema_name, "strict": True, "schema": response_schema},
+        }
     return payload
 
 
