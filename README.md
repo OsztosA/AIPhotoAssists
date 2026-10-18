@@ -160,4 +160,14 @@ python tag_images.py "C:\Users\MyUser\Pictures\MyAlbum" --dry-run
 - qwen/qwen3-vl-8b [Download](https://lmstudio.ai/models/qwen/qwen3-vl-8b)
 - AMD Ryzen 7 7700X, 32GB RAM
 - AMD Radeon RX 7900XT
-- Important: use vulcan runtime with 4K context, turn off Unified KV cache 
+- Important: use vulcan runtime with 4K context, turn off Unified KV cache
+
+## Credits & references
+
+PhotoAssist is made possible by these tools, projects, and models. Thank you to their creators and maintainers:
+
+- [LM Studio](https://lmstudio.ai/) and [Ollama](https://ollama.com/) for running local LLMs.
+- [Qwen3-VL-8B](https://lmstudio.ai/models/qwen/qwen3-vl-8b), the vision model used during testing.
+- [Mistral Small 3.2](https://lmstudio.ai/models/mistralai/mistral-small-3.2), the model I use to classify and tag my own photos.
+- [ExifTool](https://exiftool.org/) for reading and writing image metadata.
+- Python packages: [Requests](https://requests.readthedocs.io/), [Pillow](https://python-pillow.org/), [pillow-heif](https://github.com/bigcat88/pillow_heif), [piexif](https://github.com/hMatoba/Piexif), and [PyExifTool](https://github.com/sylikc/pyexiftool).
