@@ -41,6 +41,16 @@ class App(tk.Tk):
         super().__init__()
         self.title("PhotoAssist - Classify & Move")
         self.minsize(760, 600)
+        if Image is not None and ImageTk is not None:
+            icon_path = os.path.join(
+                getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__))),
+                "images",
+                "icon.jpg",
+            )
+            with Image.open(icon_path) as icon:
+                icon.thumbnail((64, 64))
+                self._app_icon = ImageTk.PhotoImage(icon)
+            self.iconphoto(True, self._app_icon)
 
         self.msg_queue: queue.Queue = queue.Queue()
         self.stop_event = threading.Event()

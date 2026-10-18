@@ -13,7 +13,7 @@ if /i "%1"=="clean" (
 )
 
 %PY% -m pip install -q -r requirements-build.txt || goto :fail
-%PY% -m PyInstaller --noconfirm --onefile --windowed --name PhotoAssist gui.py || goto :fail
+%PY% -m PyInstaller --noconfirm --onefile --windowed --name PhotoAssist --icon images\icon.jpg --add-data "images\icon.jpg;images" gui.py || goto :fail
 
 echo Built: %~dp0dist\PhotoAssist.exe
 exit /b 0
