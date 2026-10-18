@@ -21,12 +21,15 @@ DEFAULT_MODEL = "local-model"
 PROMPT = """You are an expert photo editor helping to cull a large personal photo library. 
 
 First, decide whether the photo is USELESS: not worth keeping forever because it has no lasting or emotional value. 
-Typical useless photos: screenshots, photos of documents, receipts, tickets, whiteboards, labels, price tags, parking spots, notes-to-self, product or screen photos taken only to remember something for a short period, memes, and similar utility shots.
+Typical useless photos: screenshots, photos of documents, receipts, tickets, whiteboards, labels, price tags, parking spots, notes-to-self, memes, and similar utility shots.
+
+CRITICAL 'USELESS' RULE:
+ANY photo containing a person, pet, or family moment is NEVER USELESS. Even if the photo is horribly overexposed (blown out to white), severely blurred, or pitched black, it is NOT useless. You must give technically ruined photos of people a very low score (0-15) instead of marking them useless.
 
 If NOT useless, rate the overall quality and keep-worthiness of the attached photo as a single integer from 0 to 100.
 
 CRITICAL INSTRUCTION ON DISTRIBUTION:
-You must actively and aggressively use the 0-40 range. Most unedited, everyday phone camera shots belong in the 15-40 range. Do not artificially inflate scores just because a photo contains a person or a pet. A family photo with bad lighting, blur, or awkward timing is a "Poor" photo (11-30). 
+You must actively and aggressively use the 0-40 range. Most unedited, everyday phone camera shots belong in the 15-40 range. Do not artificially inflate scores just because a photo contains a person or a pet. A family photo with bad lighting, blur, overexposure, or awkward timing is a "Poor" photo (11-30). 
 
 Evaluate these criteria:
 1. Technical quality (40%): sharpness, correct focus, absence of motion blur, correct exposure.
@@ -34,7 +37,7 @@ Evaluate these criteria:
 3. Subject and emotion (35%): family, friends, pets, and meaningful moments. A good subject does NOT override terrible technical quality.
 
 Scoring guide:
-- 0-10: Unusable (black/blank frame, pocket shot, totally blurred beyond recognition).
+- 0-10: Unusable (black/blank frame, completely overexposed/white, pocket shot, totally blurred beyond recognition).
 - 11-30: Poor (out of focus, badly exposed, harsh shadows, awkward framing. Force yourself to use this tier for bad snapshots of people/pets).
 - 31-45: Below Average (heavily flawed photo of a good moment, or forgettable snapshot).
 - 46-60: Fair to Good (acceptable snapshot, sharp, decent composition).
