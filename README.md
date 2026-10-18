@@ -91,7 +91,7 @@ Tkinter ships with the standard Python installer. Pillow is optional but needed 
 
 ### Using it
 1. **Folders**: choose the *Source* folder (searched recursively) and the *Target* folder (the scored folder structure and the `useless` folder are created there). They must be different.
-2. **Model**: pick the *Backend* (OpenAI-compatible such as LM Studio, or Ollama), check the *API URL* and select the *Model* (click *Refresh models* to reload the list; only vision models can be used). *Detect* finds the maximum number of parallel requests the model supports; it also runs automatically on Start.
+2. **Model**: pick the *Backend* (OpenAI-compatible such as LM Studio, or Ollama), check the *API URL* and select the *Model* (click *Refresh models* to reload the list; only vision models can be used). Click *Detect* to find the maximum number of parallel requests the model supports; Start uses the selected worker count without running detection.
 3. **File operation**: *Copy* (default) keeps the originals and copies the images to the target folder. *Move* (marked with a warning sign) removes the originals; when dry run is off you are asked to confirm before files are moved.
 4. **Rename**: tick *Rename image files* to rename images from their EXIF capture date. Tick *Rename video files* to rename videos using their filesystem modification date and put them in `target/videos/`, preserving source subfolders. Videos are never classified or tagged. Both use the pattern in the text box (default `YYYY.MM.DD HH24.MI.SS - %NAME%`); tokens are `YYYY MM DD HH24 MI SS` and `%NAME%`, and `:` becomes `.`.
 5. **Options**:

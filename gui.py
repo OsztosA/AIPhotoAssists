@@ -80,7 +80,7 @@ class App(tk.Tk):
         self.limit: int | None = None          # detected max parallel requests for current api+model
         self.model_types: dict[str, str | None] = {}  # model id -> 'vlm' / 'llm' / ... (LM Studio)
         self.limit_key: tuple | None = None
-        self.limit_var = tk.StringVar(value="unknown - click Detect (also runs automatically on Start)")
+        self.limit_var = tk.StringVar(value="unknown - click Detect to check")
         self.status_var = tk.StringVar(value="Ready.")
         self.stats_var = tk.StringVar(value="")
         self.counts_var = tk.StringVar(value="")
@@ -490,16 +490,15 @@ class App(tk.Tk):
         if self.limit_key is not None and self.limit_key != self._current_key():
             self.limit = None
             self.limit_key = None
-            self.limit_var.set("unknown - click Detect (also runs automatically on Start)")
+            self.limit_var.set("unknown - click Detect to check")
             self.workers_spin.configure(to=32)
 
-    def detect_limit(self, then=None):
-        """Detects the max parallel requests in a background thread; calls `then()` on success."""
+    def detect_limit(self):
+        """Detects the max parallel requests in a background thread."""
         key = self._current_key()
         self.detect_btn.configure(state="disabled")
         self.start_btn.configure(state="disabled")
         self.limit_var.set("detecting... (may load the model and take a while)")
-        self._detect_then = then
         log = lambda m: self.msg_queue.put(("log", f"[detect] {m}"))
 
         def work():
@@ -515,7 +514,7 @@ class App(tk.Tk):
         self.detect_btn.configure(state="normal")
         self.start_btn.configure(state="normal")
         if key != self._current_key():  # user changed model/url meanwhile
-            self.limit_var.set("unknown - click Detect (also runs automatically on Start)")
+            self.limit_var.set("unknown - click Detect to check")
             return
         self.limit, self.limit_key = n, key
         self.limit_var.set(f"max {n} ({src})")
@@ -523,15 +522,11 @@ class App(tk.Tk):
         if self._workers() != self.workers_var.get():
             self.workers_var.set(self._workers())
         self._append_log(f"Max parallel requests for '{key[1]}': {n} ({src}). Workers limited to {n}.")
-        then, self._detect_then = getattr(self, "_detect_then", None), None
-        if then:
-            then()
 
     def _set_limit_error(self, msg):
         self.detect_btn.configure(state="normal")
         self.start_btn.configure(state="normal")
         self.limit_var.set("detection failed - see log")
-        self._detect_then = None
         self._append_log(f"Could not detect parallel request limit: {msg}")
         messagebox.showerror("Detection failed", f"Could not determine the max parallel requests:\n\n{msg}")
 
@@ -571,12 +566,8 @@ class App(tk.Tk):
             return
 
         self._save_settings()
-        # The number of workers must never exceed what the model can process in parallel
-        if not has_images or self.limit_key == self._current_key():
-            self._launch()
-        else:
-            self.status_var.set("Detecting max parallel requests...")
-            self.detect_limit(then=self._launch)
+        # If Detect was run, _workers() caps the selected count at the detected limit.
+        self._launch()
 
     def _launch(self):
         source, target = self.source_var.get().strip(), self.target_var.get().strip()
