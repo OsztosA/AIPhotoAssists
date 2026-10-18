@@ -16,6 +16,9 @@ from ResponseParser import LLMResponseParser
 
 # Supported image extensions
 IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.gif', '.bmp')
+VIDEO_EXTENSIONS = ('.3g2', '.3gp', '.asf', '.avi', '.divx', '.flv', '.m2ts', '.m4v', '.mkv', '.mov',
+                    '.mp4', '.mpeg', '.mpg', '.mts', '.mxf', '.ogv', '.rm', '.rmvb', '.ts', '.vob', '.webm',
+                    '.wmv')
 API_URL = "http://localhost:1234/v1/chat/completions"
 DEFAULT_MODEL = "local-model"
 PROMPT = """You are an expert photo editor helping to cull a large personal photo library. 
@@ -59,6 +62,12 @@ For a useless photo set "useless" to true (the score is then ignored), e.g.: {"u
 
 def prompt_with_tags(tag_count: int) -> str:
     return PROMPT_WITH_TAGS.replace("{tag_count}", str(tag_count))
+
+
+def directory_contains_images(root_path: str) -> bool:
+    """Returns whether the directory tree contains any supported image files."""
+    return any(filename.lower().endswith(IMAGE_EXTENSIONS)
+               for _, _, filenames in os.walk(root_path) for filename in filenames)
 
 
 def response_schema(with_tags: bool, tag_count: int = 5) -> dict:
@@ -336,6 +345,49 @@ def process_single_image(original_path: str, root_path: str, output_directory: s
         return result("failed", score)
 
 
+def process_single_video(original_path: str, root_path: str, output_directory: str, dry_run: bool = False,
+                         copy_files: bool = False, rename_pattern: Optional[str] = None,
+                         log: LogCallback = print, stop_event: Optional[threading.Event] = None) -> dict:
+    """Renames and places a video in output_directory/videos without analyzing or modifying its metadata."""
+    def result(status: str, dest: Optional[str] = None) -> dict:
+        return {"path": original_path, "status": status, "score": None, "dest": dest, "tags": [],
+                "useless": False, "is_video": True}
+
+    if stop_event is not None and stop_event.is_set():
+        return result("cancelled")
+
+    try:
+        relative_dir = os.path.relpath(os.path.dirname(original_path), root_path)
+        dest_dir = os.path.join(output_directory, "videos", relative_dir)
+        filename = os.path.basename(original_path)
+        try:
+            file_date = datetime.fromtimestamp(os.path.getmtime(original_path))
+        except (OSError, OverflowError, ValueError) as e:
+            file_date = None
+            log(f"  -> Could not read file date for {filename}, keeping the original name: {e}")
+        if file_date is not None:
+            filename = format_new_filename(rename_pattern or DEFAULT_RENAME_PATTERN, file_date, filename)
+        new_path = os.path.join(dest_dir, filename)
+
+        if os.path.exists(new_path):
+            log(f"Skipping video: '{new_path}' already exists.")
+            return result("skipped", new_path)
+
+        if not dry_run:
+            os.makedirs(dest_dir, exist_ok=True)
+            if copy_files:
+                shutil.copy2(original_path, new_path)
+            else:
+                shutil.move(original_path, new_path)
+        action = "copy" if copy_files else "move"
+        verb = f"Would {action} to" if dry_run else ("Copied to" if copy_files else "Moved to")
+        log(f"  -> videos - {verb}: {new_path}")
+        return result("moved", new_path)
+    except OSError as e:
+        log(f"Error moving video {original_path}: {e}")
+        return result("failed")
+
+
 def run_classification(root_path: str, output_directory: str, max_workers: int = 5, dry_run: bool = False,
                        api_url: str = API_URL, model: str = DEFAULT_MODEL,
                        log: LogCallback = print, progress: Optional[ProgressCallback] = None,
@@ -345,12 +397,15 @@ def run_classification(root_path: str, output_directory: str, max_workers: int =
                        with_tags: bool = True, max_dimension: int = 1024,
                        tag_count: int = 5, copy_files: bool = False,
                        rename_pattern: Optional[str] = None,
-                       max_images: Optional[int] = None) -> Optional[dict]:
+                       max_images: Optional[int] = None,
+                       rename_videos: bool = False,
+                       video_rename_pattern: Optional[str] = None) -> Optional[dict]:
     """
     Core worker used by both CLI and GUI. Scans root_path, classifies and moves images using a
-    thread pool. Reports progress through the optional `progress` callback with a dict containing:
+    thread pool. When `rename_videos` is enabled, videos are renamed and placed under `output_directory/videos`
+    without classification or metadata changes. Reports progress through the optional `progress` callback with a dict containing:
     done, total, rate, avg_time, eta, counts (dict of moved/useless/skipped/failed/cancelled), finished.
-    `on_result` is called once per image with the dict returned by process_single_image.
+    `on_result` is called once per processed file with the corresponding image or video result.
     If max_images is set, the lexically first matching image paths up to that limit are processed.
     Returns the final progress dict, or None if nothing was run.
     """
@@ -365,25 +420,30 @@ def run_classification(root_path: str, output_directory: str, max_workers: int =
         log("Error: The image limit must be at least 1.")
         return None
 
-    log(f"Scanning for images in '{root_path}'...")
+    log(f"Scanning for images{' and videos' if rename_videos else ''} in '{root_path}'...")
     image_paths: list[str] = []
+    video_paths: list[str] = []
     for dirpath, _, filenames in os.walk(root_path):
         for filename in filenames:
             if filename.lower().endswith(IMAGE_EXTENSIONS):
                 image_paths.append(os.path.join(dirpath, filename))
+            elif rename_videos and filename.lower().endswith(VIDEO_EXTENSIONS):
+                video_paths.append(os.path.join(dirpath, filename))
 
     discovered_images = len(image_paths)
     if max_images is not None:
         image_paths.sort()
         image_paths = image_paths[:max_images]
-    total_images = len(image_paths)
+    paths_to_process = [(path, False) for path in image_paths] + [(path, True) for path in video_paths]
+    total_images = len(paths_to_process)
     if total_images == 0:
-        log("No images found to process.")
+        log("No supported files found to process.")
         return None
 
     if max_images is not None:
-        log(f"Benchmark file limit: selected {total_images} of {discovered_images} images.")
-    log(f"Found {total_images} images. Starting processing with {max_workers} workers "
+        log(f"Image limit: selected {len(image_paths)} of {discovered_images} images; "
+            f"processing {len(video_paths)} video(s).")
+    log(f"Found {len(image_paths)} image(s) and {len(video_paths)} video(s). Starting processing with {max_workers} workers "
         f"(model: {model}, mode: {'copy' if copy_files else 'move'}, dry run: {dry_run})...")
     log(f"Output will be saved to: '{output_directory}'")
 
@@ -411,12 +471,16 @@ def run_classification(root_path: str, output_directory: str, max_workers: int =
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         # Map futures to their original paths for better error reporting
-        future_to_path = {
-            executor.submit(process_single_image, path, root_path, output_directory, dry_run,
-                            api_url, model, log, stop_event, with_tags, on_start, max_dimension, tag_count,
-                            copy_files, rename_pattern): path
-            for path in image_paths
-        }
+        future_to_path = {}
+        for path, is_video in paths_to_process:
+            if is_video:
+                future = executor.submit(process_single_video, path, root_path, output_directory, dry_run,
+                                         copy_files, video_rename_pattern or rename_pattern, log, stop_event)
+            else:
+                future = executor.submit(process_single_image, path, root_path, output_directory, dry_run,
+                                         api_url, model, log, stop_event, with_tags, on_start, max_dimension,
+                                         tag_count, copy_files, rename_pattern)
+            future_to_path[future] = path
 
         for future in concurrent.futures.as_completed(future_to_path):
             original_path = future_to_path[future]
@@ -445,13 +509,13 @@ def run_classification(root_path: str, output_directory: str, max_workers: int =
     cancelled = stop_event is not None and stop_event.is_set()
     log("")
     log("--- Processing Summary ---" + (" (stopped by user)" if cancelled else ""))
-    log(f"Images processed: {processed_count}/{total_images}")
+    log(f"Files processed: {processed_count}/{total_images}")
     done_word = "copied" if copy_files else "moved"
     log(f"{done_word.capitalize()}{f' (dry run: would be {done_word})' if dry_run else ''}: {counts['moved']}, "
         f"useless: {counts['useless']}, skipped: {counts['skipped']}, failed: {counts['failed']}")
     log(f"Total time taken: {stats['elapsed']:.2f} seconds")
-    log(f"Average processing rate: {stats['rate']:.2f} images/sec")
-    log(f"Average time per image: {stats['avg_time']:.2f} seconds")
+    log(f"Average processing rate: {stats['rate']:.2f} files/sec")
+    log(f"Average time per file: {stats['avg_time']:.2f} seconds")
     log("Processing stopped." if cancelled else "Processing complete.")
     return stats
 
@@ -459,7 +523,8 @@ def run_classification(root_path: str, output_directory: str, max_workers: int =
 def process_images_in_directory(root_path: str, output_directory: str, max_workers: int = 5,
                                 dry_run: bool = False, api_url: str = API_URL, model: str = DEFAULT_MODEL,
                                 with_tags: bool = True, max_dimension: int = 1024, tag_count: int = 5,
-                                copy_files: bool = False, rename_pattern: Optional[str] = None):
+                                copy_files: bool = False, rename_pattern: Optional[str] = None,
+                                rename_videos: bool = False, video_rename_pattern: Optional[str] = None):
     """CLI wrapper around run_classification that shows a single-line progress bar."""
 
     def cli_progress(s: dict):
@@ -477,7 +542,8 @@ def process_images_in_directory(root_path: str, output_directory: str, max_worke
     run_classification(root_path, output_directory, max_workers, dry_run, api_url, model,
                        log=lambda m: print(f"\n{m}"), progress=cli_progress, with_tags=with_tags,
                        max_dimension=max_dimension, tag_count=tag_count, copy_files=copy_files,
-                       rename_pattern=rename_pattern)
+                       rename_pattern=rename_pattern, rename_videos=rename_videos,
+                       video_rename_pattern=video_rename_pattern)
 
 
 if __name__ == "__main__":
@@ -544,6 +610,11 @@ if __name__ == "__main__":
              f"Without a value the pattern is '{DEFAULT_RENAME_PATTERN.replace('%', '%%')}'."
     )
     parser.add_argument(
+        "--rename-videos",
+        action="store_true",
+        help="Rename videos from their file modification date and copy/move them to output/videos without classification or tags."
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Run the script without moving any files. Prints the actions that would be taken."
@@ -553,4 +624,4 @@ if __name__ == "__main__":
         parser.error("--max-dimension must be at least 1 pixel.")
     process_images_in_directory(args.directory, args.output_directory, args.workers, args.dry_run,
                                 args.api_url, args.model, not args.no_tags, args.max_dimension, max(1, args.tag_count),
-                                args.copy_files, args.rename_pattern)
+                                args.copy_files, args.rename_pattern, args.rename_videos)

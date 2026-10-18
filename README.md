@@ -33,6 +33,7 @@ This script recursively scans a directory for images, asks an LLM to rate each i
 *   Useless Category: The LLM also decides whether a photo is *useless* - no lasting or emotional value, e.g. screenshots, photos of documents, receipts, tickets, whiteboards or things photographed only to remember them for a short time. Such photos are not scored; they go to `output_directory/useless/original_subdirectory/filename.ext`. Photos of people, pets, travel or events are never useless, even if they are technically poor (they just get a low score).
 *   Copy or Move: Files are copied by default (originals are kept); moving removes the originals.
 *   Rename: Optionally renames the files from their EXIF capture date, e.g. `P1420703.JPG` -> `2014.03.01 11.48.00 - P1420703.JPG`.
+* Videos: Optionally rename video files using their file modification date and place them under `output_directory/videos/`, preserving their source subfolders. If the file date cannot be read, the original filename is kept. Videos are copied or moved according to the selected file operation, and are never sent to the LLM or tagged.
 *   Constrained Output: Requests use grammar-constrained decoding (a JSON schema with `useless`, `score` and `tags`, temperature 0), so the model can only answer in the expected format. If a server rejects the schema, the request is retried once without it.
 *   Concurrent Processing: Uses a thread pool to process multiple images at once, significantly speeding up the process. 
 *   Real-time Metrics: Displays a live progress bar showing the processing rate in images/sec.
@@ -46,7 +47,7 @@ pip install requests pillow
 ### Usage
 Run the script from your terminal, providing the source directory and a destination directory.
 ```shell
-python classify_and_move.py <source_directory> --output <destination_directory> [--workers <number>] [--max-dimension <pixels>] [--tag-count <number>] [--copy] [--rename [PATTERN]] [--dry-run]
+python classify_and_move.py <source_directory> --output <destination_directory> [--workers <number>] [--max-dimension <pixels>] [--tag-count <number>] [--copy] [--rename [PATTERN]] [--rename-videos] [--dry-run]
 ```
 
 #### Arguments
@@ -60,6 +61,7 @@ python classify_and_move.py <source_directory> --output <destination_directory> 
 - `--tag-count`: (Optional) The number of tags the LLM is asked to generate. Defaults to 5.
 - `--copy`: (Optional) Copy the images instead of moving them (the originals are kept). Without this flag the command line tool moves the files; the GUI copies by default.
 - `--rename [PATTERN]`: (Optional) Rename the files using their EXIF capture date. Without a value the pattern is `YYYY.MM.DD HH24.MI.SS - %NAME%`. Tokens: `YYYY`, `MM`, `DD`, `HH24`, `MI`, `SS` (date and time) and `%NAME%` (original file name without extension). The extension is kept, and `:` is replaced by `.` because Windows does not allow it in file names. Files without an EXIF date keep their name.
+- `--rename-videos`: (Optional) Rename supported video files using their filesystem modification date and the same filename pattern, then copy or move them into `output/videos/` while preserving source subfolders. If the file date cannot be read, the original filename is kept. Videos are not classified or tagged. Existing files at the destination are skipped.
 - `--dry-run`: (Optional) Do not copy or move any files.
 
 See [Graphical interface](#graphical-interface-guipy) for a GUI with the same options (including the image size slider and the number of tags).
@@ -91,7 +93,7 @@ Tkinter ships with the standard Python installer. Pillow is optional but needed 
 1. **Folders**: choose the *Source* folder (searched recursively) and the *Target* folder (the scored folder structure and the `useless` folder are created there). They must be different.
 2. **Model**: pick the *Backend* (OpenAI-compatible such as LM Studio, or Ollama), check the *API URL* and select the *Model* (click *Refresh models* to reload the list; only vision models can be used). *Detect* finds the maximum number of parallel requests the model supports; it also runs automatically on Start.
 3. **File operation**: *Copy* (default) keeps the originals and copies the images to the target folder. *Move* (marked with a warning sign) removes the originals; when dry run is off you are asked to confirm before files are moved.
-4. **Rename**: tick *Rename files* to rename the images from their EXIF capture date using the pattern in the text box (enabled only while the checkbox is ticked; default `YYYY.MM.DD HH24.MI.SS - %NAME%`, which gives e.g. `2014.03.01 11.48.00 - P1420703.JPG`). Tokens are `YYYY MM DD HH24 MI SS` and `%NAME%`; `:` in a pattern becomes `.`. Files without an EXIF date keep their name.
+4. **Rename**: tick *Rename image files* to rename images from their EXIF capture date. Tick *Rename video files* to rename videos using their filesystem modification date and put them in `target/videos/`, preserving source subfolders. Videos are never classified or tagged. Both use the pattern in the text box (default `YYYY.MM.DD HH24.MI.SS - %NAME%`); tokens are `YYYY MM DD HH24 MI SS` and `%NAME%`, and `:` becomes `.`.
 5. **Options**:
    - *Dry run*: nothing is copied or moved, the results are only shown. It is on by default.
    - *Ask LLM for tags*: also request descriptive tags, shown in the Results tab.
