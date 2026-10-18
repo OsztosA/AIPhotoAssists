@@ -96,6 +96,7 @@ Tkinter ships with the standard Python installer. Pillow is optional but needed 
    - *Dry run*: nothing is copied or moved, the results are only shown. It is on by default.
    - *Ask LLM for tags*: also request descriptive tags, shown in the Results tab.
    - *Workers*: number of parallel requests (limited to the detected maximum of the model).
+   - *Benchmark*: processes up to the specified number of images in a forced dry run, regardless of the regular dry-run setting. Each completed benchmark is appended to `benchmark_results.csv` next to the application, with timestamps, elapsed/average timings, throughput, score histogram and run options.
 6. **LLM request**:
    - *Tags to generate*: how many tags the LLM is asked for (default 5).
    - *Image size sent to LLM*: slider from 25% to 100% (default 100%). The image is downscaled before it is sent, which speeds up processing and lowers memory use; 100% sends the original file.

@@ -1,10 +1,12 @@
 """Tkinter GUI for classify_and_move: configure parameters, run and watch progress."""
+import csv
 import json
 import os
 import queue
 import sys
 import threading
 import tkinter as tk
+from datetime import datetime
 from tkinter import filedialog, messagebox, ttk
 
 import classify_and_move as cm
@@ -56,6 +58,12 @@ class App(tk.Tk):
         self.model_var = tk.StringVar(value=s.get("model", cm.DEFAULT_MODEL))
         self.workers_var = tk.IntVar(value=s.get("workers", DEFAULT_WORKERS))
         self.dry_run_var = tk.BooleanVar(value=s.get("dry_run", DEFAULT_DRY_RUN))  # safe default
+        self.benchmark_var = tk.BooleanVar(value=bool(s.get("benchmark", False)))
+        try:
+            benchmark_files = max(1, int(s.get("benchmark_files", 100)))
+        except (TypeError, ValueError):
+            benchmark_files = 100
+        self.benchmark_files_var = tk.IntVar(value=benchmark_files)
         self.rename_var = tk.BooleanVar(value=bool(s.get("rename", DEFAULT_RENAME)))
         self.rename_pattern_var = tk.StringVar(value=self._initial_rename_pattern(s))
         self.mode_var = tk.StringVar(value=s.get("mode", DEFAULT_MODE)
@@ -81,7 +89,7 @@ class App(tk.Tk):
         for var in (self.source_var, self.target_var, self.api_var, self.model_var,
                     self.workers_var, self.dry_run_var, self.mode_var, self.tags_var,
                     self.rename_var, self.rename_pattern_var,
-                    self.resize_var, self.tag_count_var):
+                    self.resize_var, self.tag_count_var, self.benchmark_var, self.benchmark_files_var):
             var.trace_add("write", lambda *_: self._schedule_save())
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self.after(100, self._poll_queue)
@@ -153,6 +161,17 @@ class App(tk.Tk):
         self.workers_spin.pack(side="left")
         ttk.Label(opts, text="(limited to the model's max parallel requests)", foreground="#666").pack(
             side="left", padx=8)
+        benchmark_options = ttk.Frame(opts)
+        benchmark_options.pack(fill="x")
+        self.benchmark_check = ttk.Checkbutton(
+            benchmark_options, text="Benchmark (always dry run)", variable=self.benchmark_var,
+            command=self._update_benchmark_state)
+        self.benchmark_check.pack(side="left", **pad)
+        ttk.Label(benchmark_options, text="Number of files:").pack(side="left", padx=(12, 4))
+        self.benchmark_files_spin = ttk.Spinbox(
+            benchmark_options, from_=1, to=10000, width=7, textvariable=self.benchmark_files_var)
+        self.benchmark_files_spin.pack(side="left")
+        self._update_benchmark_state()
 
         opts2 = ttk.LabelFrame(root, text="LLM request", padding=8)
         opts2.pack(fill="x", **pad)
@@ -412,6 +431,7 @@ class App(tk.Tk):
             "source": self.source_var.get(), "target": self.target_var.get(),
             "api_url": self.api_var.get(), "api_urls": self.backend_urls, "model": self.model_var.get(),
             "workers": self._workers(), "dry_run": self.dry_run_var.get(), "mode": self.mode_var.get(),
+            "benchmark": self.benchmark_var.get(), "benchmark_files": self._benchmark_file_count(),
             "rename": self.rename_var.get(), "rename_pattern": self.rename_pattern_var.get(),
             "with_tags": self.tags_var.get(),
             "resize_percent": self._resize_percent(), "tag_count": self._tag_count(),
@@ -438,6 +458,15 @@ class App(tk.Tk):
             return max(1, int(self.tag_count_var.get()))
         except (tk.TclError, ValueError):
             return DEFAULT_TAG_COUNT
+
+    def _benchmark_file_count(self) -> int:
+        try:
+            return min(10000, max(1, int(self.benchmark_files_var.get())))
+        except (tk.TclError, ValueError):
+            return 100
+
+    def _update_benchmark_state(self):
+        self.benchmark_files_spin.configure(state="normal" if self.benchmark_var.get() else "disabled")
 
     def _workers(self) -> int:
         try:
@@ -526,9 +555,10 @@ class App(tk.Tk):
             return
         if not self._is_vision_model_ok():
             return
-        if not self.dry_run_var.get() and self.mode_var.get() == "move" and not messagebox.askyesno(
-                "Move files?", "Dry run is OFF. Images will be MOVED from the source to the target folder "
-                               "(the originals are removed).\n\nContinue?"):
+        if (not self.benchmark_var.get() and not self.dry_run_var.get()
+                and self.mode_var.get() == "move" and not messagebox.askyesno(
+                    "Move files?", "Dry run is OFF. Images will be MOVED from the source to the target folder "
+                                   "(the originals are removed).\n\nContinue?")):
             return
 
         self._save_settings()
@@ -552,25 +582,57 @@ class App(tk.Tk):
 
         args = dict(
             root_path=source, output_directory=target, max_workers=self._workers(),
-            dry_run=self.dry_run_var.get(), copy_files=self.mode_var.get() == "copy",
+            dry_run=self.dry_run_var.get() or self.benchmark_var.get(),
             rename_pattern=((self.rename_pattern_var.get().strip() or cm.DEFAULT_RENAME_PATTERN)
                             if self.rename_var.get() else None),
             api_url=self.api_var.get().strip(),
             model=self.model_var.get().strip() or cm.DEFAULT_MODEL,
             with_tags=self.tags_var.get(),
             resize_percent=self._resize_percent(), tag_count=self._tag_count(),
+            copy_files=self.mode_var.get() == "copy",
         )
+        benchmark = self.benchmark_var.get()
+        benchmark_options = {
+            "source": source,
+            "target": target,
+            "model": args["model"],
+            "api_url": args["api_url"],
+            "workers": args["max_workers"],
+            "copy_files": args["copy_files"],
+            "dry_run": args["dry_run"],
+            "with_tags": args["with_tags"],
+            "resize_percent": args["resize_percent"],
+            "tag_count": args["tag_count"],
+            "rename_pattern": args["rename_pattern"],
+            "number_of_files": self._benchmark_file_count() if benchmark else None,
+        }
+        if benchmark:
+            args["max_images"] = self._benchmark_file_count()
+            self.msg_queue.put(("log", f"Benchmark mode: processing at most {args['max_images']} image(s) as a dry run."))
 
         def work():
+            run_started = datetime.now().astimezone()
+            histogram = [0] * 11
+
+            def on_result(result):
+                if result.get("useless"):
+                    histogram[10] += 1
+                elif result.get("score") is not None:
+                    histogram[min(result["score"] // 10, 9)] += 1
+                self.msg_queue.put(("result", result))
+
             try:
-                cm.run_classification(
+                stats = cm.run_classification(
                     **args,
                     log=lambda m: self.msg_queue.put(("log", m)),
                     progress=lambda s: self.msg_queue.put(("progress", s)),
                     stop_event=self.stop_event,
-                    on_result=lambda r: self.msg_queue.put(("result", r)),
+                    on_result=on_result,
                     on_start=self._preview_start,
                 )
+                if benchmark and stats is not None:
+                    self._append_benchmark_result(run_started, datetime.now().astimezone(),
+                                                  stats, histogram, benchmark_options)
             except Exception as e:
                 self.msg_queue.put(("log", f"Unexpected error: {e}"))
             finally:
@@ -578,6 +640,36 @@ class App(tk.Tk):
 
         self.worker = threading.Thread(target=work, daemon=True)
         self.worker.start()
+
+    def _append_benchmark_result(self, started, finished, stats, histogram, options):
+        path = os.path.join(APP_DIR, "benchmark_results.csv")
+        fields = ("datetime", "started_at", "finished_at", "elapsed_seconds", "average_seconds_per_image",
+                  "images_per_second", "processed_images", "histogram", "options")
+        row = {
+            "datetime": finished.isoformat(timespec="seconds"),
+            "started_at": started.isoformat(timespec="seconds"),
+            "finished_at": finished.isoformat(timespec="seconds"),
+            "elapsed_seconds": f"{stats['elapsed']:.3f}",
+            "average_seconds_per_image": f"{stats['avg_time']:.3f}",
+            "images_per_second": f"{stats['rate']:.3f}",
+            "processed_images": stats["done"],
+            "histogram": json.dumps({
+                **{f"{i * 10}-{i * 10 + (10 if i == 9 else 9)}": histogram[i] for i in range(10)},
+                "useless": histogram[10],
+            }, separators=(",", ":")),
+            "options": json.dumps(options, ensure_ascii=False, separators=(",", ":"), sort_keys=True),
+        }
+        try:
+            write_header = not os.path.exists(path) or os.path.getsize(path) == 0
+            with open(path, "a", newline="", encoding="utf-8") as f:
+                writer = csv.DictWriter(f, fieldnames=fields)
+                if write_header:
+                    writer.writeheader()
+                writer.writerow(row)
+        except OSError as e:
+            self.msg_queue.put(("log", f"Could not append benchmark results to '{path}': {e}"))
+        else:
+            self.msg_queue.put(("log", f"Benchmark results appended to '{path}'."))
 
     def stop(self):
         self.stop_event.set()

@@ -344,12 +344,14 @@ def run_classification(root_path: str, output_directory: str, max_workers: int =
                        on_start: Optional[StartCallback] = None,
                        with_tags: bool = True, resize_percent: int = 100,
                        tag_count: int = 5, copy_files: bool = False,
-                       rename_pattern: Optional[str] = None) -> Optional[dict]:
+                       rename_pattern: Optional[str] = None,
+                       max_images: Optional[int] = None) -> Optional[dict]:
     """
     Core worker used by both CLI and GUI. Scans root_path, classifies and moves images using a
     thread pool. Reports progress through the optional `progress` callback with a dict containing:
     done, total, rate, avg_time, eta, counts (dict of moved/useless/skipped/failed/cancelled), finished.
     `on_result` is called once per image with the dict returned by process_single_image.
+    If max_images is set, the lexically first matching image paths up to that limit are processed.
     Returns the final progress dict, or None if nothing was run.
     """
     if not os.path.isdir(root_path):
@@ -359,6 +361,9 @@ def run_classification(root_path: str, output_directory: str, max_workers: int =
     if not output_directory:
         log("Error: An output directory must be specified for this operation.")
         return None
+    if max_images is not None and max_images < 1:
+        log("Error: The image limit must be at least 1.")
+        return None
 
     log(f"Scanning for images in '{root_path}'...")
     image_paths: list[str] = []
@@ -367,11 +372,17 @@ def run_classification(root_path: str, output_directory: str, max_workers: int =
             if filename.lower().endswith(IMAGE_EXTENSIONS):
                 image_paths.append(os.path.join(dirpath, filename))
 
+    discovered_images = len(image_paths)
+    if max_images is not None:
+        image_paths.sort()
+        image_paths = image_paths[:max_images]
     total_images = len(image_paths)
     if total_images == 0:
         log("No images found to process.")
         return None
 
+    if max_images is not None:
+        log(f"Benchmark file limit: selected {total_images} of {discovered_images} images.")
     log(f"Found {total_images} images. Starting processing with {max_workers} workers "
         f"(model: {model}, mode: {'copy' if copy_files else 'move'}, dry run: {dry_run})...")
     log(f"Output will be saved to: '{output_directory}'")
