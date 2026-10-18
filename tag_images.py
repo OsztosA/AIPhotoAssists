@@ -5,15 +5,15 @@ import concurrent.futures
 import time
 import requests
 
-from JpegImage import JpegImage
+from JpegImage import HEIF_EXTENSIONS, JpegImage, set_exiftool_path
 from LLM import LLM
 from ResponseParser import LLMResponseParser
 
 # --- Configuration ---
 # IMPORTANT: Change this URL to your local model's endpoint.
 API_URL = "http://localhost:1234/v1/chat/completions"
-# Supported image extensions for EXIF writing
-JPEG_EXTENSIONS = ('.jpg', '.jpeg')
+# Supported image extensions for metadata writing
+IMAGE_EXTENSIONS = ('.jpg', '.jpeg') + HEIF_EXTENSIONS
 
 PROMPT = """
         Act as a photo assistant. Analyze this image and generate metadata. Provide a concise title, a one-sentence description, and a list of relevant keywords.
@@ -74,7 +74,7 @@ def process_single_image(image: JpegImage, dry_run):
 
 
 def process_images_in_directory(root_path, max_workers=5, dry_run=False):
-    """Uses a thread pool to find and tag JPEG images in a directory, showing progress."""
+    """Uses a thread pool to find and tag JPEG/HEIF images in a directory, showing progress."""
     if not os.path.isdir(root_path):
         print(f"Error: Directory not found at '{root_path}'")
         return
@@ -86,11 +86,11 @@ def process_images_in_directory(root_path, max_workers=5, dry_run=False):
     all_image_paths = []
     for dirpath, _, filenames in os.walk(root_path):
         for filename in filenames:
-            if filename.lower().endswith(JPEG_EXTENSIONS):
+            if filename.lower().endswith(IMAGE_EXTENSIONS):
                 all_image_paths.append(os.path.join(dirpath, filename))
 
     if not all_image_paths:
-        print("No JPEG images found to process.")
+        print("No supported images found to process.")
         return
 
     print(f"Found {len(all_image_paths)} total images. Checking for existing tags...")
@@ -154,12 +154,12 @@ def process_images_in_directory(root_path, max_workers=5, dry_run=False):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Generate and write EXIF tags to JPEG images using a local LLM."
+        description="Generate and write EXIF tags to JPEG and HEIF images using a local LLM."
     )
     parser.add_argument(
         "directory",
         type=str,
-        help="The root directory path to search for JPEG images."
+        help="The root directory path to search for JPEG and HEIF images."
     )
     parser.add_argument(
         "-w", "--workers",
@@ -172,5 +172,12 @@ if __name__ == "__main__":
         action="store_true",
         help="Run the script without modifying any files. Prints the actions that would be taken."
     )
+    parser.add_argument(
+        "--exiftool-path",
+        type=str,
+        default=None,
+        help="Path to exiftool.exe. If omitted, ExifTool must be available on PATH."
+    )
     args = parser.parse_args()
+    set_exiftool_path(args.exiftool_path)
     process_images_in_directory(args.directory, args.workers, args.dry_run)

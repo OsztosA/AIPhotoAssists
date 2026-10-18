@@ -12,6 +12,7 @@ from tkinter import filedialog, messagebox, ttk
 import classify_and_move as cm
 import LLMBackend
 import LLMCapacity
+from JpegImage import set_exiftool_path
 
 try:  # Pillow is optional: without it the in-progress preview is simply disabled
     from PIL import Image, ImageOps, ImageTk
@@ -49,6 +50,8 @@ class App(tk.Tk):
         s = self._load_settings()
         self.source_var = tk.StringVar(value=s.get("source", DEFAULT_SOURCE))
         self.target_var = tk.StringVar(value=s.get("target", DEFAULT_TARGET))
+        self.exiftool_var = tk.StringVar(value=s.get("exiftool_path", ""))
+        set_exiftool_path(self.exiftool_var.get())
         self.api_var = tk.StringVar(value=s.get("api_url", cm.API_URL))
         # The backend (OpenAI-compatible vs. Ollama) follows from the URL; remember one URL per backend
         self.backend_var = tk.StringVar(value=LLMBackend.backend_for_url(self.api_var.get()))
@@ -92,10 +95,13 @@ class App(tk.Tk):
         # Persist every setting as soon as it changes (debounced), not only on Start / close
         self._save_job = None
         for var in (self.source_var, self.target_var, self.api_var, self.model_var,
+                    self.exiftool_var,
                     self.workers_var, self.dry_run_var, self.mode_var, self.tags_var,
                     self.rename_var, self.rename_videos_var, self.rename_pattern_var,
                     self.max_dimension_var, self.tag_count_var, self.benchmark_var, self.benchmark_files_var):
             var.trace_add("write", lambda *_: self._schedule_save())
+        self.exiftool_var.trace_add(
+            "write", lambda *_: set_exiftool_path(self.exiftool_var.get().strip() or None))
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self.after(100, self._poll_queue)
         self.after(200, self.refresh_models)
@@ -133,6 +139,11 @@ class App(tk.Tk):
         ttk.Label(model, textvariable=self.limit_var).grid(row=3, column=1, sticky="w", **pad)
         self.detect_btn = ttk.Button(model, text="Detect", command=self.detect_limit)
         self.detect_btn.grid(row=3, column=2, sticky="ew", **pad)
+        ttk.Label(model, text="ExifTool executable:").grid(row=4, column=0, sticky="w", **pad)
+        ttk.Entry(model, textvariable=self.exiftool_var).grid(row=4, column=1, sticky="ew", **pad)
+        ttk.Button(model, text="Browse...", command=self._browse_exiftool).grid(row=4, column=2, **pad)
+        ttk.Label(model, text="Leave blank to use ExifTool from PATH.",
+                  foreground="#666").grid(row=5, column=1, sticky="w", padx=8)
 
         # Copy / move
         fileop = ttk.LabelFrame(root, text="File operation", padding=8)
@@ -394,6 +405,18 @@ class App(tk.Tk):
         if path:
             var.set(os.path.normpath(path))
 
+    def _browse_exiftool(self):
+        current = self.exiftool_var.get().strip()
+        initial = os.path.dirname(os.path.abspath(current)) if current else None
+        path = filedialog.askopenfilename(
+            initialdir=initial,
+            title="Select ExifTool executable",
+            filetypes=(("ExifTool executable", "exiftool*.exe"), ("Executable files", "*.exe"),
+                       ("All files", "*.*")),
+        )
+        if path:
+            self.exiftool_var.set(os.path.normpath(path))
+
     # ---------- Backend ----------
     def _on_url_changed(self):
         """Keeps the backend selector and the per-backend URL memory in sync with a hand-edited URL."""
@@ -435,6 +458,7 @@ class App(tk.Tk):
             self._save_job = None
         data = {
             "source": self.source_var.get(), "target": self.target_var.get(),
+            "exiftool_path": self.exiftool_var.get(),
             "api_url": self.api_var.get(), "api_urls": self.backend_urls, "model": self.model_var.get(),
             "workers": self._workers(), "dry_run": self.dry_run_var.get(), "mode": self.mode_var.get(),
             "benchmark": self.benchmark_var.get(), "benchmark_files": self._benchmark_file_count(),

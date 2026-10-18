@@ -1,3 +1,5 @@
 requests
 pillow
 piexif
+pillow-heif>=0.14.0
+pyexiftool

@@ -9,13 +9,13 @@ import time
 
 from datetime import datetime
 from typing import Callable, Optional
-from JpegImage import JpegImage
+from JpegImage import HEIF_EXTENSIONS, JpegImage, set_exiftool_path
 from LLM import LLM
 import LLMBackend
 from ResponseParser import LLMResponseParser
 
 # Supported image extensions
-IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.gif', '.bmp')
+IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.gif', '.bmp') + HEIF_EXTENSIONS
 VIDEO_EXTENSIONS = ('.3g2', '.3gp', '.asf', '.avi', '.divx', '.flv', '.m2ts', '.m4v', '.mkv', '.mov',
                     '.mp4', '.mpeg', '.mpg', '.mts', '.mxf', '.ogv', '.rm', '.rmvb', '.ts', '.vob', '.webm',
                     '.wmv')
@@ -333,7 +333,7 @@ def process_single_image(original_path: str, root_path: str, output_directory: s
                 shutil.copy2(original_path, new_path)
             else:
                 shutil.move(original_path, new_path)
-            if new_path.lower().endswith(('.jpg', '.jpeg')) and (score is not None or tags):
+            if new_path.lower().endswith(('.jpg', '.jpeg') + HEIF_EXTENSIONS) and (score is not None or tags):
                 # Store the quality score as the first keyword ("Q:<score>"), followed by the LLM tags
                 JpegImage(new_path).write_exif_tags({"keywords": tags}, score=score)
         action = "copy" if copy_files else "move"
@@ -581,6 +581,12 @@ if __name__ == "__main__":
         help=f"Chat completions endpoint. Default is {API_URL}."
     )
     parser.add_argument(
+        "--exiftool-path",
+        type=str,
+        default=None,
+        help="Path to exiftool.exe. If omitted, ExifTool must be available on PATH."
+    )
+    parser.add_argument(
         "--no-tags",
         action="store_true",
         help="Only ask the LLM for a score, not for descriptive tags."
@@ -622,6 +628,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     if args.max_dimension < 1:
         parser.error("--max-dimension must be at least 1 pixel.")
+    set_exiftool_path(args.exiftool_path)
     process_images_in_directory(args.directory, args.output_directory, args.workers, args.dry_run,
                                 args.api_url, args.model, not args.no_tags, args.max_dimension, max(1, args.tag_count),
                                 args.copy_files, args.rename_pattern, args.rename_videos)

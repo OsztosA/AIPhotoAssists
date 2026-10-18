@@ -6,10 +6,12 @@ I have a massive library of photos and simply don't have the time to examine the
 
 -   `classify_and_move.py`: Classifies images by quality and copies (or moves) them into a new directory structure based on their score. Screenshots, document photos and other throw-away shots go to a separate `useless` folder.
 -   `tag_images.py`: Generates descriptive metadata for images and writes it to their EXIF tags.
+-   HEIC/HEIF images are supported for classification and tagging. They are converted to JPEG for LLM requests, capture dates are read from embedded EXIF metadata, and ExifTool writes tags directly without re-encoding the image.
 
 ## Common Prerequisite
 
 Both scripts require a running local LLM with an API endpoint that can process images (multimodal). You must edit the API_URL variable in each script to point to your model's endpoint.
+Writing metadata to HEIC/HEIF files also requires [ExifTool](https://exiftool.org/) (download it from https://exiftool.org/). In the GUI, browse to `exiftool.exe` in the *ExifTool executable* field; leave it blank to use the executable on `PATH`. Both CLI tools accept `--exiftool-path <path>` for its location. The standalone GUI requires ExifTool to be installed separately.
 
 **IMPORTANT: Change this URL to your local model's endpoint**
 
@@ -41,13 +43,13 @@ This script recursively scans a directory for images, asks an LLM to rate each i
 
 ### Installation
 ```shell   
-pip install requests pillow
+pip install -r requirements.txt
 ```
 
 ### Usage
 Run the script from your terminal, providing the source directory and a destination directory.
 ```shell
-python classify_and_move.py <source_directory> --output <destination_directory> [--workers <number>] [--max-dimension <pixels>] [--tag-count <number>] [--copy] [--rename [PATTERN]] [--rename-videos] [--dry-run]
+python classify_and_move.py <source_directory> --output <destination_directory> [--workers <number>] [--max-dimension <pixels>] [--tag-count <number>] [--copy] [--rename [PATTERN]] [--rename-videos] [--exiftool-path <path>] [--dry-run]
 ```
 
 #### Arguments
@@ -56,6 +58,7 @@ python classify_and_move.py <source_directory> --output <destination_directory> 
 - `-w, --workers`: (Optional) The number of concurrent threads to use. Defaults to 5.
 - `-m, --model`: (Optional) Model name sent to the API. Defaults to `local-model`.
 - `--api-url`: (Optional) Chat completions endpoint of the LLM server.
+- `--exiftool-path`: (Optional) Path to `exiftool.exe`; otherwise it must be available on `PATH`.
 - `--no-tags`: (Optional) Only ask the LLM for a score, not for tags.
 - `--max-dimension`: (Optional) Limit the longest image side to this many pixels before sending it to the LLM. The other side is scaled to preserve the aspect ratio; images already within the limit are unchanged. Defaults to 1024 pixels. `--resize` is retained as an alias.
 - `--tag-count`: (Optional) The number of tags the LLM is asked to generate. Defaults to 5.
@@ -122,30 +125,31 @@ This installs the dependencies from `requirements-build.txt` (including PyInstal
 ---
 
 ## 2. EXIF Tagger `tag_images.py`
-This script recursively scans a directory for JPEG images, asks an LLM to generate a title, description, and keywords for each image, and writes this information directly into the image's EXIF metadata.
+This script recursively scans a directory for JPEG and HEIC/HEIF images, asks an LLM to generate a title, description, and keywords for each image, and writes this information directly into the image's EXIF metadata.
 
 ### Features
 *   AI-Powered Tagging: Uses an LLM to generate a relevant title, a one-sentence description, and a list of keywords.
-*   Direct EXIF Writing: Modifies the image file to embed the generated metadata.
+*   Direct EXIF Writing: Modifies the image file to embed the generated metadata. HEIC files are updated in place with ExifTool, without re-encoding.
 *   Concurrent Processing: Uses a thread pool for fast, parallel processing.
 *   Real-time Metrics: Displays a live progress bar with the processing rate in images/sec.
 *   Safe Mode: Includes a --dry-run flag to preview the tags that would be written without modifying any files.
 
 ### Installation
 ```shell  
-pip install requests piexif
+pip install -r requirements.txt
 ```
 
 ### Usage
 Run the script from your terminal, providing the directory containing the images you want to tag.
 ```shell
-python tag_images.py <source_directory> [--workers <number>] [--dry-run]
+python tag_images.py <source_directory> [--workers <number>] [--exiftool-path <path>] [--dry-run]
 ```
 
 ### Arguments
-- `source_directory`: The root directory to search for .jpg or .jpeg images.
+- `source_directory`: The root directory to search for .jpg, .jpeg, .heic, and .heif images.
 - `-w, --workers`: (Optional) The number of concurrent threads to use. Defaults to 5.
 - `--dry-run`: (Optional) Run the script in simulation mode. It will print the tags it would have written but will not change any files. 
+- `--exiftool-path`: (Optional) Path to `exiftool.exe`; otherwise it must be available on `PATH`.
 
 ### Examples
 ```shell
