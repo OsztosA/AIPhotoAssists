@@ -1,23 +1,55 @@
-# Image Processing Scripts with Local LLM
+# PhotoAssist - AI-Powered Photo Organizer
 
 ## Overview
-I have a massive library of photos and simply don't have the time to examine them one by one to delete the bad ones. These scripts were created to automate the process of rating and tagging images, making them easier to manage. By generating quality scores and descriptive metadata, I can use powerful tools like DigiKam, which can read EXIF tags and search by content, to quickly filter, find, and organize my entire collection.
- Python scripts designed to process a large number of images using a local Large Language Model (LLM).
+PhotoAssist is a desktop application for reviewing and organizing large photo libraries with a local multimodal Large Language Model (LLM). Its graphical interface lets you configure a run, monitor live progress, and review scores and tags. Command-line tools are also available for users who prefer scripts.
 
--   `classify_and_move.py`: Classifies images by quality and copies (or moves) them into a new directory structure based on their score. Screenshots, document photos and other throw-away shots go to a separate `useless` folder.
--   `tag_images.py`: Generates descriptive metadata for images and writes it to their EXIF tags.
--   HEIC/HEIF images are supported for classification and tagging. They are converted to JPEG for LLM requests, capture dates are read from embedded EXIF metadata, and ExifTool writes tags directly without re-encoding the image.
+![PhotoAssist graphical interface](images/Screenshot%202026-10-18%20193435.jpg)
 
-## Common Prerequisite
+PhotoAssist can organize images by quality, identify throw-away images such as screenshots and receipts, rename files by capture date, and write descriptive metadata to image EXIF tags. HEIC/HEIF images are supported; they are converted to JPEG for LLM requests, and ExifTool writes tags directly without re-encoding them.
 
-Both scripts require a running local LLM with an API endpoint that can process images (multimodal). You must edit the API_URL variable in each script to point to your model's endpoint.
-Writing metadata to HEIC/HEIF files also requires [ExifTool](https://exiftool.org/) (download it from https://exiftool.org/). In the GUI, browse to `exiftool.exe` in the *ExifTool executable* field; leave it blank to use the executable on `PATH`. Both CLI tools accept `--exiftool-path <path>` for its location. The standalone GUI requires ExifTool to be installed separately.
+## Graphical interface (`gui.py`)
 
-**IMPORTANT: Change this URL to your local model's endpoint**
+The Tkinter application is the primary way to use PhotoAssist: configure a run in one window, start processing, and monitor results live. It uses the same image-classification code as the command-line tool.
 
-```python
-API_URL = "http://localhost:1234/v1/chat/completions"
+### Running
+```shell
+pip install -r requirements.txt
+python gui.py
 ```
+Tkinter ships with the standard Python installer. Pillow is optional but needed for the live image previews.
+
+### Using it
+1. **Folders**: choose the *Source* folder (searched recursively) and the *Target* folder (the scored folder structure and the `useless` folder are created there). They must be different.
+2. **Model**: pick the *Backend* (OpenAI-compatible such as LM Studio, or Ollama), check the *API URL* and select the *Model* (click *Refresh models* to reload the list; only vision models can be used). Click *Detect* to find the maximum number of parallel requests the model supports; Start uses the selected worker count without running detection.
+3. **File operation**: *Copy* (default) keeps the originals and copies the images to the target folder. *Move* (marked with a warning sign) removes the originals; when dry run is off you are asked to confirm before files are moved.
+4. **Rename**: tick *Rename image files* to rename images from their EXIF capture date. Tick *Rename video files* to rename videos using their filesystem modification date and put them in `target/videos/`, preserving source subfolders. Videos are never classified or tagged. Both use the pattern in the text box (default `YYYY.MM.DD HH24.MI.SS - %NAME%`); tokens are `YYYY MM DD HH24 MI SS` and `%NAME%`, and `:` becomes `.`.
+5. **Options**:
+   - *Dry run*: nothing is copied or moved, the results are only shown. It is on by default.
+   - *Ask LLM for tags*: also request descriptive tags, shown in the Results tab.
+   - *Workers*: number of parallel requests (limited to the detected maximum of the model).
+   - *Benchmark*: processes up to the specified number of images in a forced dry run, regardless of the regular dry-run setting. Each completed benchmark is appended to `benchmark_results.csv` next to the application, with timestamps, elapsed/average timings, throughput, score histogram and run options.
+6. **LLM request**:
+   - *Tags to generate*: how many tags the LLM is asked for (default 5).
+   - *Maximum image dimension*: limits the longest side sent to the LLM (default 1024 pixels). The other side is scaled to preserve the aspect ratio; images already within the limit are sent unchanged.
+7. Press **Start**; **Stop** cancels the run after the in-flight requests finish.
+
+While running you see a progress bar with rate and ETA, thumbnails of the images being processed, and two tabs:
+- **Results**: a score histogram (with an extra grey bar for useless photos) and a table (file, score, tags, result, destination). Useless photos show `useless` in the score column. Click a column heading to sort, double-click a row to open the file.
+- **Log**: messages and errors.
+
+The progress area shows the running counts of copied/moved, useless, skipped and failed images. All settings are saved automatically to `gui_settings.json` next to the application and restored on the next start.
+
+### Building a standalone executable
+To get a single `PhotoAssist.exe` that runs without a Python installation (Windows):
+```shell
+build.bat
+```
+This installs the dependencies from `requirements-build.txt` (including PyInstaller) and writes `dist\PhotoAssist.exe`. Use `build.bat clean` to remove previous build output first. The exe stores `gui_settings.json` next to itself.
+
+## LLM and metadata prerequisites
+
+PhotoAssist requires a running local LLM with an API endpoint that can process images (multimodal). In the GUI, configure the backend, API URL, and model in the *Model* section. The classifier CLI accepts `--api-url` (defaulting to the URL in `classify_and_move.py`); `tag_images.py` uses the `API_URL` value in that script.
+Writing metadata to HEIC/HEIF files also requires [ExifTool](https://exiftool.org/) (download it from https://exiftool.org/). In the GUI, browse to `exiftool.exe` in the *ExifTool executable* field; leave it blank to use the executable on `PATH`. Both CLI tools accept `--exiftool-path <path>` for its location. The standalone GUI requires ExifTool to be installed separately.
 
 ## Disclaimer
 
@@ -79,48 +111,6 @@ python classify_and_move.py "C:\Users\MyUser\Pictures" --output "D:\SortedPics" 
 # Copy (keep the originals) and rename to "2014.03.01 11.48.00 - P1420703.JPG"
 python classify_and_move.py "C:\Users\MyUser\Pictures" --output "D:\SortedPics" --copy --rename
 ```
-
----
-
-## Graphical interface `gui.py`
-A Tkinter front end for `classify_and_move.py`: configure everything in one window, run it and watch the progress live. It uses the same code as the command line tool.
-
-### Running
-```shell
-pip install -r requirements.txt
-python gui.py
-```
-Tkinter ships with the standard Python installer. Pillow is optional but needed for the live image previews.
-
-### Using it
-1. **Folders**: choose the *Source* folder (searched recursively) and the *Target* folder (the scored folder structure and the `useless` folder are created there). They must be different.
-2. **Model**: pick the *Backend* (OpenAI-compatible such as LM Studio, or Ollama), check the *API URL* and select the *Model* (click *Refresh models* to reload the list; only vision models can be used). Click *Detect* to find the maximum number of parallel requests the model supports; Start uses the selected worker count without running detection.
-3. **File operation**: *Copy* (default) keeps the originals and copies the images to the target folder. *Move* (marked with a warning sign) removes the originals; when dry run is off you are asked to confirm before files are moved.
-4. **Rename**: tick *Rename image files* to rename images from their EXIF capture date. Tick *Rename video files* to rename videos using their filesystem modification date and put them in `target/videos/`, preserving source subfolders. Videos are never classified or tagged. Both use the pattern in the text box (default `YYYY.MM.DD HH24.MI.SS - %NAME%`); tokens are `YYYY MM DD HH24 MI SS` and `%NAME%`, and `:` becomes `.`.
-5. **Options**:
-   - *Dry run*: nothing is copied or moved, the results are only shown. It is on by default.
-   - *Ask LLM for tags*: also request descriptive tags, shown in the Results tab.
-   - *Workers*: number of parallel requests (limited to the detected maximum of the model).
-   - *Benchmark*: processes up to the specified number of images in a forced dry run, regardless of the regular dry-run setting. Each completed benchmark is appended to `benchmark_results.csv` next to the application, with timestamps, elapsed/average timings, throughput, score histogram and run options.
-6. **LLM request**:
-   - *Tags to generate*: how many tags the LLM is asked for (default 5).
-   - *Maximum image dimension*: limits the longest side sent to the LLM (default 1024 pixels). The other side is scaled to preserve the aspect ratio; images already within the limit are sent unchanged.
-7. Press **Start**; **Stop** cancels the run after the in-flight requests finish.
-
-While running you see a progress bar with rate and ETA, thumbnails of the images being processed, and two tabs:
-- **Results**: a score histogram (with an extra grey bar for useless photos) and a table (file, score, tags, result, destination). Useless photos show `useless` in the score column. Click a column heading to sort, double-click a row to open the file.
-
-The progress area shows the running counts of copied/moved, useless, skipped and failed images.
-- **Log**: messages and errors.
-
-All settings are saved automatically to `gui_settings.json` next to the script and restored on the next start.
-
-### Building a standalone executable
-To get a single `PhotoAssist.exe` that runs without a Python installation (Windows):
-```shell
-build.bat
-```
-This installs the dependencies from `requirements-build.txt` (including PyInstaller) and writes `dist\PhotoAssist.exe`. Use `build.bat clean` to remove previous build output first. The exe stores `gui_settings.json` next to itself.
 
 ---
 
