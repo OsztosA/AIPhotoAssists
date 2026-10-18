@@ -18,28 +18,28 @@ from ResponseParser import LLMResponseParser
 IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.gif', '.bmp')
 API_URL = "http://localhost:1234/v1/chat/completions"
 DEFAULT_MODEL = "local-model"
-PROMPT = """You are an expert photo editor helping to cull a large personal photo library.
-First decide whether the photo is USELESS: not worth keeping forever because it has no lasting or emotional value.
-Typical useless photos: screenshots, photos of documents, receipts, tickets, whiteboards, labels, price tags, parking spots,
-notes-to-self, product or screen photos taken only to remember something for a short period, memes, and similar utility shots.
-A photo of people, family, pets, travel, nature or events is NOT useless, even if it is technically poor (just give it a low score).
-If the photo is useless, it is not rated.
-Otherwise rate the overall quality and keep-worthiness of the attached photo as a single integer from 0 to 100.
+PROMPT = """You are an expert photo editor helping to cull a large personal photo library. 
+
+First, decide whether the photo is USELESS: not worth keeping forever because it has no lasting or emotional value. 
+Typical useless photos: screenshots, photos of documents, receipts, tickets, whiteboards, labels, price tags, parking spots, notes-to-self, product or screen photos taken only to remember something for a short period, memes, and similar utility shots.
+
+If NOT useless, rate the overall quality and keep-worthiness of the attached photo as a single integer from 0 to 100.
+
+CRITICAL INSTRUCTION ON DISTRIBUTION:
+You must actively and aggressively use the 0-40 range. Most unedited, everyday phone camera shots belong in the 15-40 range. Do not artificially inflate scores just because a photo contains a person or a pet. A family photo with bad lighting, blur, or awkward timing is a "Poor" photo (11-30). 
 
 Evaluate these criteria:
-1. Technical quality (about 40%): sharpness and correct focus on the subject, absence of motion blur and camera shake, correct exposure (no blown highlights or crushed shadows), natural colors, low noise.
-2. Composition (about 25%): framing, subject placement, balance, level horizon, no distracting elements or awkwardly cropped subjects.
-3. Subject and emotion (about 35%): photos of family members, friends, children, and meaningful moments or events (smiles, interaction, milestones, travel memories) are highly valuable. People should have open eyes and pleasant expressions. A technically imperfect photo of an important family moment still deserves a decent score.
+1. Technical quality (40%): sharpness, correct focus, absence of motion blur, correct exposure.
+2. Composition (25%): framing, subject placement, level horizon, no distracting elements.
+3. Subject and emotion (35%): family, friends, pets, and meaningful moments. A good subject does NOT override terrible technical quality.
 
 Scoring guide:
-- 0-10: unusable (black/blank frame, accidental shot, heavily blurred, pocket photo, finger over lens)
-- 11-30: poor (out of focus, badly exposed or badly composed, no meaningful content)
-- 31-50: mediocre (acceptable snapshot, forgettable or near-duplicate quality)
-- 51-70: good (sharp, decent composition, pleasant content)
-- 71-85: very good (strong composition, great light, or an important family/people moment)
-- 86-100: outstanding (professional-quality, or an irreplaceable family memory that is also well captured)
-
-Be critical and use the full range; do not give every photo a score in the middle.
+- 0-10: Unusable (black/blank frame, pocket shot, totally blurred beyond recognition).
+- 11-30: Poor (out of focus, badly exposed, harsh shadows, awkward framing. Force yourself to use this tier for bad snapshots of people/pets).
+- 31-45: Below Average (heavily flawed photo of a good moment, or forgettable snapshot).
+- 46-60: Fair to Good (acceptable snapshot, sharp, decent composition).
+- 61-85: Very Good (strong composition, great light, or an exceptionally well-captured family moment).
+- 86-100: Outstanding (professional-quality).
 """
 
 USELESS_CATEGORY = "useless"  # name of the output folder for useless photos
