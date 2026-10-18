@@ -163,3 +163,4 @@ python tag_images.py "C:\Users\MyUser\Pictures\MyAlbum" --dry-run
 - qwen/qwen3-vl-8b [Download](https://lmstudio.ai/models/qwen/qwen3-vl-8b)
 - AMD Ryzen 7 7700X, 32GB RAM
 - AMD Radeon RX 7900XT
+- Important: use vulcan runtime with 4K context, turn off Unified KV cache 
