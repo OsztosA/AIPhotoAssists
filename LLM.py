@@ -10,7 +10,7 @@ class LLM:
         self.model = model or "local-model"
         self.timeout = timeout
 
-    def call_llm(self, image: JpegImage, prompt: str, scale_percent: int = 100,
+    def call_llm(self, image: JpegImage, prompt: str, max_dimension: int = 1024,
                  response_schema: dict | None = None, temperature: float | None = None,
                  schema_name: str = "response") -> str | None:
         """
@@ -18,7 +18,7 @@ class LLM:
         server rejects the schema (HTTP 400) the request is retried once without it.
         """
         headers = {"Content-Type": "application/json"}
-        image_b64 = image.get_as_base64(scale_percent)
+        image_b64 = image.get_as_base64(max_dimension)
 
         def build(schema: dict | None) -> dict:
             # Works for both OpenAI-compatible servers and Ollama (chosen by the URL, see LLMBackend)

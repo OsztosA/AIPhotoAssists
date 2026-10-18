@@ -12,21 +12,21 @@ class JpegImage:
     def __init__(self, path):
         self.path = path
 
-    def get_as_base64(self, scale_percent: int = 100):
-        """Returns the image as base64 JPEG, downscaled to scale_percent (25-100) of its size."""
+    def get_as_base64(self, max_dimension: int = 1024):
+        """Returns the image as base64, limiting its longest side to max_dimension pixels."""
         try:
-            if scale_percent >= 100:
-                with open(self.path, "rb") as image_file:
-                    return base64.b64encode(image_file.read()).decode('utf-8')
             with Image.open(self.path) as im:
-                width, height = im.size
-                size = (max(1, round(width * scale_percent / 100)), max(1, round(height * scale_percent / 100)))
-                im.draft("RGB", size)  # fast downscaled JPEG decoding
-                im = im.convert("RGB").resize(size, Image.LANCZOS)
+                if max_dimension < 1:
+                    raise ValueError("Maximum image dimension must be at least 1 pixel.")
+                if max(im.size) <= max_dimension:
+                    with open(self.path, "rb") as image_file:
+                        return base64.b64encode(image_file.read()).decode('utf-8')
+                im.thumbnail((max_dimension, max_dimension), Image.LANCZOS)
+                im = im.convert("RGB")
                 buf = io.BytesIO()
                 im.save(buf, format="JPEG", quality=90)
                 return base64.b64encode(buf.getvalue()).decode('utf-8')
-        except (IOError, OSError) as e:
+        except (IOError, OSError, ValueError) as e:
             print(f"Error reading image file {self.path}: {e}")
             return None
 

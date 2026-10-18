@@ -219,7 +219,7 @@ def _fetch_ollama_model_infos(api_url: str, timeout: float = 5) -> list[dict]:
 
 def classify_image(image_path: str, api_url: str = API_URL, model: str = DEFAULT_MODEL,
                    log: LogCallback = print, with_tags: bool = True,
-                   resize_percent: int = 100, tag_count: int = 5) -> Optional[dict]:
+                   max_dimension: int = 1024, tag_count: int = 5) -> Optional[dict]:
     """
     Sends an image to the local LLM endpoint for classification.
     Returns {'score': int | None, 'tags': [str], 'useless': bool} (tags empty if not requested; score None for
@@ -232,7 +232,7 @@ def classify_image(image_path: str, api_url: str = API_URL, model: str = DEFAULT
             return None
         jpeg_image = JpegImage(image_path)
         response = llm.call_llm(jpeg_image, prompt_with_tags(tag_count) if with_tags else PROMPT_SCORE_ONLY,
-                                resize_percent, response_schema=response_schema(with_tags, tag_count),
+                                max_dimension, response_schema=response_schema(with_tags, tag_count),
                                 temperature=0.0, schema_name="photo_rating")
         if response is None:
             return None
@@ -257,7 +257,7 @@ def process_single_image(original_path: str, root_path: str, output_directory: s
                          api_url: str = API_URL, model: str = DEFAULT_MODEL,
                          log: LogCallback = print, stop_event: Optional[threading.Event] = None,
                          with_tags: bool = True, on_start: Optional[StartCallback] = None,
-                         resize_percent: int = 100, tag_count: int = 5, copy_files: bool = False,
+                         max_dimension: int = 1024, tag_count: int = 5, copy_files: bool = False,
                          rename_pattern: Optional[str] = None) -> dict:
     """
     Classifies a single image and moves it. Designed to be run in a thread pool.
@@ -286,7 +286,7 @@ def process_single_image(original_path: str, root_path: str, output_directory: s
     log(f"Processing: {original_path}")
     if on_start:
         on_start(original_path)
-    classification = classify_image(original_path, api_url, model, log, with_tags, resize_percent, tag_count)
+    classification = classify_image(original_path, api_url, model, log, with_tags, max_dimension, tag_count)
 
     if classification is None:
         log(f"  -> Could not get score for {original_path}. Skipping.")
@@ -342,7 +342,7 @@ def run_classification(root_path: str, output_directory: str, max_workers: int =
                        stop_event: Optional[threading.Event] = None,
                        on_result: Optional[ResultCallback] = None,
                        on_start: Optional[StartCallback] = None,
-                       with_tags: bool = True, resize_percent: int = 100,
+                       with_tags: bool = True, max_dimension: int = 1024,
                        tag_count: int = 5, copy_files: bool = False,
                        rename_pattern: Optional[str] = None,
                        max_images: Optional[int] = None) -> Optional[dict]:
@@ -413,7 +413,7 @@ def run_classification(root_path: str, output_directory: str, max_workers: int =
         # Map futures to their original paths for better error reporting
         future_to_path = {
             executor.submit(process_single_image, path, root_path, output_directory, dry_run,
-                            api_url, model, log, stop_event, with_tags, on_start, resize_percent, tag_count,
+                            api_url, model, log, stop_event, with_tags, on_start, max_dimension, tag_count,
                             copy_files, rename_pattern): path
             for path in image_paths
         }
@@ -458,7 +458,7 @@ def run_classification(root_path: str, output_directory: str, max_workers: int =
 
 def process_images_in_directory(root_path: str, output_directory: str, max_workers: int = 5,
                                 dry_run: bool = False, api_url: str = API_URL, model: str = DEFAULT_MODEL,
-                                with_tags: bool = True, resize_percent: int = 100, tag_count: int = 5,
+                                with_tags: bool = True, max_dimension: int = 1024, tag_count: int = 5,
                                 copy_files: bool = False, rename_pattern: Optional[str] = None):
     """CLI wrapper around run_classification that shows a single-line progress bar."""
 
@@ -476,7 +476,7 @@ def process_images_in_directory(root_path: str, output_directory: str, max_worke
 
     run_classification(root_path, output_directory, max_workers, dry_run, api_url, model,
                        log=lambda m: print(f"\n{m}"), progress=cli_progress, with_tags=with_tags,
-                       resize_percent=resize_percent, tag_count=tag_count, copy_files=copy_files,
+                       max_dimension=max_dimension, tag_count=tag_count, copy_files=copy_files,
                        rename_pattern=rename_pattern)
 
 
@@ -520,8 +520,8 @@ if __name__ == "__main__":
         help="Only ask the LLM for a score, not for descriptive tags."
     )
     parser.add_argument(
-        "--resize", type=int, default=100, choices=range(25, 101), metavar="25-100",
-        help="Resize the image to this percentage before sending it to the LLM. Default is 100."
+        "--max-dimension", "--resize", dest="max_dimension", type=int, default=1024, metavar="PIXELS",
+        help="Limit the image's longest side to this many pixels before sending it to the LLM. Default is 1024."
     )
     parser.add_argument(
         "--tag-count", type=int, default=5,
@@ -549,6 +549,8 @@ if __name__ == "__main__":
         help="Run the script without moving any files. Prints the actions that would be taken."
     )
     args = parser.parse_args()
+    if args.max_dimension < 1:
+        parser.error("--max-dimension must be at least 1 pixel.")
     process_images_in_directory(args.directory, args.output_directory, args.workers, args.dry_run,
-                                args.api_url, args.model, not args.no_tags, args.resize, max(1, args.tag_count),
+                                args.api_url, args.model, not args.no_tags, args.max_dimension, max(1, args.tag_count),
                                 args.copy_files, args.rename_pattern)

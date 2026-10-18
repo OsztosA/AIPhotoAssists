@@ -46,7 +46,7 @@ pip install requests pillow
 ### Usage
 Run the script from your terminal, providing the source directory and a destination directory.
 ```shell
-python classify_and_move.py <source_directory> --output <destination_directory> [--workers <number>] [--resize <25-100>] [--tag-count <number>] [--copy] [--rename [PATTERN]] [--dry-run]
+python classify_and_move.py <source_directory> --output <destination_directory> [--workers <number>] [--max-dimension <pixels>] [--tag-count <number>] [--copy] [--rename [PATTERN]] [--dry-run]
 ```
 
 #### Arguments
@@ -56,7 +56,7 @@ python classify_and_move.py <source_directory> --output <destination_directory> 
 - `-m, --model`: (Optional) Model name sent to the API. Defaults to `local-model`.
 - `--api-url`: (Optional) Chat completions endpoint of the LLM server.
 - `--no-tags`: (Optional) Only ask the LLM for a score, not for tags.
-- `--resize`: (Optional) Resize each image to this percentage (25-100) before sending it to the LLM. Smaller images are faster to process. Defaults to 100 (original file, unchanged).
+- `--max-dimension`: (Optional) Limit the longest image side to this many pixels before sending it to the LLM. The other side is scaled to preserve the aspect ratio; images already within the limit are unchanged. Defaults to 1024 pixels. `--resize` is retained as an alias.
 - `--tag-count`: (Optional) The number of tags the LLM is asked to generate. Defaults to 5.
 - `--copy`: (Optional) Copy the images instead of moving them (the originals are kept). Without this flag the command line tool moves the files; the GUI copies by default.
 - `--rename [PATTERN]`: (Optional) Rename the files using their EXIF capture date. Without a value the pattern is `YYYY.MM.DD HH24.MI.SS - %NAME%`. Tokens: `YYYY`, `MM`, `DD`, `HH24`, `MI`, `SS` (date and time) and `%NAME%` (original file name without extension). The extension is kept, and `:` is replaced by `.` because Windows does not allow it in file names. Files without an EXIF date keep their name.
@@ -68,8 +68,8 @@ See [Graphical interface](#graphical-interface-guipy) for a GUI with the same op
 ```shell
 python classify_and_move.py "C:\Users\MyUser\Pictures" --output "D:\SortedPics" --workers 5
 
-# Send images at 50% size and ask for 8 tags
-python classify_and_move.py "C:\Users\MyUser\Pictures" --output "D:\SortedPics" --resize 50 --tag-count 8
+# Limit the longest side to 1024 pixels and ask for 8 tags
+python classify_and_move.py "C:\Users\MyUser\Pictures" --output "D:\SortedPics" --max-dimension 1024 --tag-count 8
 
 # Copy (keep the originals) and rename to "2014.03.01 11.48.00 - P1420703.JPG"
 python classify_and_move.py "C:\Users\MyUser\Pictures" --output "D:\SortedPics" --copy --rename
@@ -99,7 +99,7 @@ Tkinter ships with the standard Python installer. Pillow is optional but needed 
    - *Benchmark*: processes up to the specified number of images in a forced dry run, regardless of the regular dry-run setting. Each completed benchmark is appended to `benchmark_results.csv` next to the application, with timestamps, elapsed/average timings, throughput, score histogram and run options.
 6. **LLM request**:
    - *Tags to generate*: how many tags the LLM is asked for (default 5).
-   - *Image size sent to LLM*: slider from 25% to 100% (default 100%). The image is downscaled before it is sent, which speeds up processing and lowers memory use; 100% sends the original file.
+   - *Maximum image dimension*: limits the longest side sent to the LLM (default 1024 pixels). The other side is scaled to preserve the aspect ratio; images already within the limit are sent unchanged.
 7. Press **Start**; **Stop** cancels the run after the in-flight requests finish.
 
 While running you see a progress bar with rate and ETA, thumbnails of the images being processed, and two tabs:

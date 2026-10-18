@@ -29,9 +29,9 @@ DEFAULT_DRY_RUN = True
 DEFAULT_RENAME = False
 DEFAULT_MODE = "copy"
 DEFAULT_WITH_TAGS = True
-MIN_RESIZE_PERCENT = 5
-MAX_RESIZE_PERCENT = 100
-DEFAULT_RESIZE_PERCENT = 25
+MIN_MAX_DIMENSION = 1
+MAX_MAX_DIMENSION = 8192
+DEFAULT_MAX_DIMENSION = 1024
 DEFAULT_TAG_COUNT = 5
 
 
@@ -69,8 +69,12 @@ class App(tk.Tk):
         self.mode_var = tk.StringVar(value=s.get("mode", DEFAULT_MODE)
                                      if s.get("mode") in ("copy", "move") else DEFAULT_MODE)
         self.tags_var = tk.BooleanVar(value=s.get("with_tags", DEFAULT_WITH_TAGS))
-        self.resize_var = tk.IntVar(value=min(MAX_RESIZE_PERCENT, max(
-            MIN_RESIZE_PERCENT, int(s.get("resize_percent", DEFAULT_RESIZE_PERCENT)))))
+        try:
+            max_dimension = int(s.get("max_dimension", DEFAULT_MAX_DIMENSION))
+        except (TypeError, ValueError):
+            max_dimension = DEFAULT_MAX_DIMENSION
+        self.max_dimension_var = tk.IntVar(value=min(MAX_MAX_DIMENSION, max(
+            MIN_MAX_DIMENSION, max_dimension)))
         self.tag_count_var = tk.IntVar(value=max(1, int(s.get("tag_count", DEFAULT_TAG_COUNT))))
         self.limit: int | None = None          # detected max parallel requests for current api+model
         self.model_types: dict[str, str | None] = {}  # model id -> 'vlm' / 'llm' / ... (LM Studio)
@@ -89,7 +93,7 @@ class App(tk.Tk):
         for var in (self.source_var, self.target_var, self.api_var, self.model_var,
                     self.workers_var, self.dry_run_var, self.mode_var, self.tags_var,
                     self.rename_var, self.rename_pattern_var,
-                    self.resize_var, self.tag_count_var, self.benchmark_var, self.benchmark_files_var):
+                    self.max_dimension_var, self.tag_count_var, self.benchmark_var, self.benchmark_files_var):
             var.trace_add("write", lambda *_: self._schedule_save())
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self.after(100, self._poll_queue)
@@ -177,14 +181,10 @@ class App(tk.Tk):
         opts2.pack(fill="x", **pad)
         ttk.Label(opts2, text="Tags to generate:").pack(side="left", padx=(8, 4))
         ttk.Spinbox(opts2, from_=1, to=50, width=5, textvariable=self.tag_count_var).pack(side="left")
-        ttk.Label(opts2, text="Image size sent to LLM:").pack(side="left", padx=(24, 4))
-        self.resize_label = ttk.Label(opts2, width=5)
-        ttk.Scale(opts2, from_=MIN_RESIZE_PERCENT, to=MAX_RESIZE_PERCENT, orient="horizontal", length=180,
-                  variable=self.resize_var,
-                  command=lambda v: self.resize_var.set(round(float(v)))).pack(side="left")
-        self.resize_label.pack(side="left", padx=4)
-        self.resize_var.trace_add("write", lambda *_: self.resize_label.configure(text=f"{self.resize_var.get()}%"))
-        self.resize_label.configure(text=f"{self.resize_var.get()}%")
+        ttk.Label(opts2, text="Maximum image dimension:").pack(side="left", padx=(24, 4))
+        ttk.Spinbox(opts2, from_=MIN_MAX_DIMENSION, to=MAX_MAX_DIMENSION, width=7,
+                    textvariable=self.max_dimension_var).pack(side="left")
+        ttk.Label(opts2, text="pixels (longest side; aspect ratio preserved)").pack(side="left", padx=4)
 
         # Controls
         controls = ttk.Frame(root)
@@ -434,7 +434,7 @@ class App(tk.Tk):
             "benchmark": self.benchmark_var.get(), "benchmark_files": self._benchmark_file_count(),
             "rename": self.rename_var.get(), "rename_pattern": self.rename_pattern_var.get(),
             "with_tags": self.tags_var.get(),
-            "resize_percent": self._resize_percent(), "tag_count": self._tag_count(),
+            "max_dimension": self._max_dimension(), "tag_count": self._tag_count(),
         }
         try:
             with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
@@ -447,11 +447,11 @@ class App(tk.Tk):
             self.after_cancel(self._save_job)
         self._save_job = self.after(500, self._save_settings)
 
-    def _resize_percent(self) -> int:
+    def _max_dimension(self) -> int:
         try:
-            return min(MAX_RESIZE_PERCENT, max(MIN_RESIZE_PERCENT, int(self.resize_var.get())))
+            return min(MAX_MAX_DIMENSION, max(MIN_MAX_DIMENSION, int(self.max_dimension_var.get())))
         except (tk.TclError, ValueError):
-            return DEFAULT_RESIZE_PERCENT
+            return DEFAULT_MAX_DIMENSION
 
     def _tag_count(self) -> int:
         try:
@@ -588,7 +588,7 @@ class App(tk.Tk):
             api_url=self.api_var.get().strip(),
             model=self.model_var.get().strip() or cm.DEFAULT_MODEL,
             with_tags=self.tags_var.get(),
-            resize_percent=self._resize_percent(), tag_count=self._tag_count(),
+            max_dimension=self._max_dimension(), tag_count=self._tag_count(),
             copy_files=self.mode_var.get() == "copy",
         )
         benchmark = self.benchmark_var.get()
@@ -601,7 +601,7 @@ class App(tk.Tk):
             "copy_files": args["copy_files"],
             "dry_run": args["dry_run"],
             "with_tags": args["with_tags"],
-            "resize_percent": args["resize_percent"],
+            "max_dimension": args["max_dimension"],
             "tag_count": args["tag_count"],
             "rename_pattern": args["rename_pattern"],
             "number_of_files": self._benchmark_file_count() if benchmark else None,
