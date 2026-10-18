@@ -19,7 +19,18 @@ except ImportError:  # pragma: no cover
 # Next to the exe when frozen by PyInstaller (the bundled __file__ lives in a temp folder)
 APP_DIR = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
 SETTINGS_FILE = os.path.join(APP_DIR, "gui_settings.json")
-THUMB_SIZE = 240  # max edge (px) of the in-progress preview thumbnails
+THUMB_SIZE = 192  # max edge (px) of the in-progress preview thumbnails
+DEFAULT_SOURCE = ""
+DEFAULT_TARGET = ""
+DEFAULT_WORKERS = 5
+DEFAULT_DRY_RUN = True
+DEFAULT_RENAME = False
+DEFAULT_MODE = "copy"
+DEFAULT_WITH_TAGS = True
+MIN_RESIZE_PERCENT = 5
+MAX_RESIZE_PERCENT = 100
+DEFAULT_RESIZE_PERCENT = 25
+DEFAULT_TAG_COUNT = 5
 
 
 class App(tk.Tk):
@@ -34,8 +45,8 @@ class App(tk.Tk):
         self.worker: threading.Thread | None = None
 
         s = self._load_settings()
-        self.source_var = tk.StringVar(value=s.get("source", ""))
-        self.target_var = tk.StringVar(value=s.get("target", ""))
+        self.source_var = tk.StringVar(value=s.get("source", DEFAULT_SOURCE))
+        self.target_var = tk.StringVar(value=s.get("target", DEFAULT_TARGET))
         self.api_var = tk.StringVar(value=s.get("api_url", cm.API_URL))
         # The backend (OpenAI-compatible vs. Ollama) follows from the URL; remember one URL per backend
         self.backend_var = tk.StringVar(value=LLMBackend.backend_for_url(self.api_var.get()))
@@ -43,14 +54,16 @@ class App(tk.Tk):
         self.backend_urls.update({k: v for k, v in (s.get("api_urls") or {}).items() if k in self.backend_urls})
         self.backend_urls[self.backend_var.get()] = self.api_var.get()
         self.model_var = tk.StringVar(value=s.get("model", cm.DEFAULT_MODEL))
-        self.workers_var = tk.IntVar(value=s.get("workers", 5))
-        self.dry_run_var = tk.BooleanVar(value=s.get("dry_run", True))  # safe default
-        self.rename_var = tk.BooleanVar(value=bool(s.get("rename", False)))
+        self.workers_var = tk.IntVar(value=s.get("workers", DEFAULT_WORKERS))
+        self.dry_run_var = tk.BooleanVar(value=s.get("dry_run", DEFAULT_DRY_RUN))  # safe default
+        self.rename_var = tk.BooleanVar(value=bool(s.get("rename", DEFAULT_RENAME)))
         self.rename_pattern_var = tk.StringVar(value=self._initial_rename_pattern(s))
-        self.mode_var = tk.StringVar(value=s.get("mode", "copy") if s.get("mode") in ("copy", "move") else "copy")
-        self.tags_var = tk.BooleanVar(value=s.get("with_tags", True))
-        self.resize_var = tk.IntVar(value=min(100, max(25, int(s.get("resize_percent", 100)))))
-        self.tag_count_var = tk.IntVar(value=max(1, int(s.get("tag_count", 5))))
+        self.mode_var = tk.StringVar(value=s.get("mode", DEFAULT_MODE)
+                                     if s.get("mode") in ("copy", "move") else DEFAULT_MODE)
+        self.tags_var = tk.BooleanVar(value=s.get("with_tags", DEFAULT_WITH_TAGS))
+        self.resize_var = tk.IntVar(value=min(MAX_RESIZE_PERCENT, max(
+            MIN_RESIZE_PERCENT, int(s.get("resize_percent", DEFAULT_RESIZE_PERCENT)))))
+        self.tag_count_var = tk.IntVar(value=max(1, int(s.get("tag_count", DEFAULT_TAG_COUNT))))
         self.limit: int | None = None          # detected max parallel requests for current api+model
         self.model_types: dict[str, str | None] = {}  # model id -> 'vlm' / 'llm' / ... (LM Studio)
         self.limit_key: tuple | None = None
@@ -147,7 +160,8 @@ class App(tk.Tk):
         ttk.Spinbox(opts2, from_=1, to=50, width=5, textvariable=self.tag_count_var).pack(side="left")
         ttk.Label(opts2, text="Image size sent to LLM:").pack(side="left", padx=(24, 4))
         self.resize_label = ttk.Label(opts2, width=5)
-        ttk.Scale(opts2, from_=25, to=100, orient="horizontal", length=180, variable=self.resize_var,
+        ttk.Scale(opts2, from_=MIN_RESIZE_PERCENT, to=MAX_RESIZE_PERCENT, orient="horizontal", length=180,
+                  variable=self.resize_var,
                   command=lambda v: self.resize_var.set(round(float(v)))).pack(side="left")
         self.resize_label.pack(side="left", padx=4)
         self.resize_var.trace_add("write", lambda *_: self.resize_label.configure(text=f"{self.resize_var.get()}%"))
@@ -415,21 +429,21 @@ class App(tk.Tk):
 
     def _resize_percent(self) -> int:
         try:
-            return min(100, max(25, int(self.resize_var.get())))
+            return min(MAX_RESIZE_PERCENT, max(MIN_RESIZE_PERCENT, int(self.resize_var.get())))
         except (tk.TclError, ValueError):
-            return 100
+            return DEFAULT_RESIZE_PERCENT
 
     def _tag_count(self) -> int:
         try:
             return max(1, int(self.tag_count_var.get()))
         except (tk.TclError, ValueError):
-            return 5
+            return DEFAULT_TAG_COUNT
 
     def _workers(self) -> int:
         try:
             n = max(1, int(self.workers_var.get()))
         except (tk.TclError, ValueError):
-            n = 5
+            n = DEFAULT_WORKERS
         return min(n, self.limit) if self.limit else n
 
     # ---------- Parallel request limit ----------
