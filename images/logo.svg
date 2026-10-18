@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 200" width="100%" height="100%">
+  <defs>
+    <linearGradient id="logoBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#090D16" />
+      <stop offset="100%" stop-color="#0F172A" />
+    </linearGradient>
+
+    <linearGradient id="accentAi" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38BDF8" />
+      <stop offset="50%" stop-color="#818CF8" />
+      <stop offset="100%" stop-color="#C084FC" />
+    </linearGradient>
+
+    <linearGradient id="textGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#818CF8" />
+      <stop offset="100%" stop-color="#38BDF8" />
+    </linearGradient>
+  </defs>
+
+  <!-- Background Banner -->
+  <rect width="800" height="200" rx="24" fill="url(#logoBg)"/>
+
+  <!-- Logo Mark (Left) -->
+  <g transform="translate(30, 25)">
+    <!-- Squircle Container -->
+    <rect x="0" y="0" width="150" height="150" rx="36" fill="#1E1B4B" stroke="#334155" stroke-width="2"/>
+
+    <!-- Angled Photo Card -->
+    <rect x="45" y="25" width="70" height="85" rx="10" transform="rotate(10 80 67)" fill="#4338CA" opacity="0.4"/>
+
+    <!-- Front Photo Card -->
+    <rect x="30" y="30" width="90" height="90" rx="14" fill="#0F172A" stroke="#475569" stroke-width="2"/>
+
+    <!-- Lens Core -->
+    <circle cx="75" cy="75" r="24" fill="#030712" stroke="url(#accentAi)" stroke-width="3"/>
+    <circle cx="75" cy="75" r="7" fill="url(#accentAi)"/>
+
+    <!-- AI Sparkle on Mark -->
+    <path d="M 115 20 Q 115 35 130 35 Q 115 35 115 50 Q 115 35 100 35 Q 115 35 115 20 Z" fill="url(#accentAi)"/>
+  </g>
+
+  <!-- Typography -->
+  <!-- "Photo" -->
+  <text x="215" y="105" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="58" font-weight="800" fill="#F8FAFC" letter-spacing="-1">Photo</text>
+
+  <!-- "Assist" with Gradient AI Color -->
+  <text x="382" y="105" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="58" font-weight="800" fill="url(#textGrad)" letter-spacing="-1">Assist</text>
+
+  <!-- Sparkle next to text -->
+  <path d="M 570 65 Q 570 78 583 78 Q 570 78 570 91 Q 570 78 557 78 Q 570 78 570 65 Z" fill="url(#accentAi)"/>
+
+  <!-- Tagline -->
+  <text x="218" y="142" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="16" font-weight="500" fill="#94A3B8" letter-spacing="3">AI-POWERED LOCAL PHOTO ORGANIZER</text>
+
+  <!-- Pill Badge: LOCAL LLM -->
+  <rect x="660" y="45" width="102" height="26" rx="13" fill="#1E293B" stroke="#38BDF8" stroke-width="1.2"/>
+  <text x="711" y="62" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="10" font-weight="700" fill="#38BDF8" text-anchor="middle" letter-spacing="1">100% LOCAL</text>
+</svg>

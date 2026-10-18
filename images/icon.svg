@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <!-- Background Gradient -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0F172A" />
+      <stop offset="100%" stop-color="#1E1B4B" />
+    </linearGradient>
+
+    <!-- Photo Card Gradient -->
+    <linearGradient id="cardGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#312E81" stop-opacity="0.85" />
+      <stop offset="100%" stop-color="#1E293B" stop-opacity="0.85" />
+    </linearGradient>
+
+    <!-- AI Magic Gradient -->
+    <linearGradient id="aiGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38BDF8" />
+      <stop offset="50%" stop-color="#818CF8" />
+      <stop offset="100%" stop-color="#C084FC" />
+    </linearGradient>
+
+    <!-- Lens Rim Gradient -->
+    <linearGradient id="lensRim" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38BDF8" stop-opacity="0.6" />
+      <stop offset="100%" stop-color="#6366F1" stop-opacity="0.2" />
+    </linearGradient>
+
+    <!-- Glow Filter -->
+    <filter id="softGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="12" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+
+  <!-- Squircle Base / Tile -->
+  <rect x="24" y="24" width="464" height="464" rx="108" fill="url(#bgGrad)" stroke="#334155" stroke-width="3"/>
+
+  <!-- Back Photo Card (Offset / Tilted) -->
+  <rect x="156" y="96" width="220" height="270" rx="24" transform="rotate(12 266 231)" fill="#4338CA" opacity="0.35" />
+
+  <!-- Front Photo Frame -->
+  <rect x="116" y="116" width="280" height="280" rx="32" fill="url(#cardGrad)" stroke="#475569" stroke-width="4"/>
+
+  <!-- Viewfinder / Camera Brackets inside Frame -->
+  <path d="M 152 176 L 152 152 L 176 152" fill="none" stroke="#94A3B8" stroke-width="6" stroke-linecap="round"/>
+  <path d="M 360 176 L 360 152 L 336 152" fill="none" stroke="#94A3B8" stroke-width="6" stroke-linecap="round"/>
+  <path d="M 152 336 L 152 360 L 176 360" fill="none" stroke="#94A3B8" stroke-width="6" stroke-linecap="round"/>
+  <path d="M 360 336 L 360 360 L 336 360" fill="none" stroke="#94A3B8" stroke-width="6" stroke-linecap="round"/>
+
+  <!-- Central Camera Lens / Aperture Ring -->
+  <circle cx="256" cy="256" r="76" fill="#0B0F19" stroke="url(#lensRim)" stroke-width="8"/>
+  <circle cx="256" cy="256" r="54" fill="#030712" />
+
+  <!-- Aperture Blades Accent -->
+  <path d="M 230 208 L 272 220 L 256 256 Z" fill="#6366F1" opacity="0.4"/>
+  <path d="M 294 230 L 282 272 L 256 256 Z" fill="#818CF8" opacity="0.4"/>
+  <path d="M 282 282 L 240 270 L 256 256 Z" fill="#38BDF8" opacity="0.4"/>
+  <path d="M 218 270 L 230 228 L 256 256 Z" fill="#A855F7" opacity="0.4"/>
+
+  <!-- Inner Sparkle Pupil -->
+  <circle cx="256" cy="256" r="14" fill="url(#aiGrad)" />
+
+  <!-- AI Primary Sparkle (Top-Right of Camera) -->
+  <g filter="url(#softGlow)">
+    <path d="M 365 95 Q 365 145 415 145 Q 365 145 365 195 Q 365 145 315 145 Q 365 145 365 95 Z" fill="url(#aiGrad)" />
+  </g>
+
+  <!-- Minor Accent Sparkle (Bottom-Left) -->
+  <path d="M 130 365 Q 130 385 150 385 Q 130 385 130 405 Q 130 385 110 385 Q 130 385 130 365 Z" fill="#38BDF8" opacity="0.8"/>
+</svg>

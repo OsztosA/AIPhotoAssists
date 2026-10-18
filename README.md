@@ -1,4 +1,5 @@
 # PhotoAssist - AI-Powered Photo Organizer
+<img src="images/logo.svg" alt="PhotoAssist - AI-Powered Photo Organizer" width="100%">
 
 ## Overview
 PhotoAssist is a desktop application for reviewing and organizing large photo libraries with a local multimodal Large Language Model (LLM). Its graphical interface lets you configure a run, monitor live progress, and review scores and tags. Command-line tools are also available for users who prefer scripts.
