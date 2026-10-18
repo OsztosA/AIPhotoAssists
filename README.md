@@ -168,6 +168,6 @@ PhotoAssist is made possible by these tools, projects, and models. Thank you to 
 
 - [LM Studio](https://lmstudio.ai/) and [Ollama](https://ollama.com/) for running local LLMs.
 - [Qwen3-VL-8B](https://lmstudio.ai/models/qwen/qwen3-vl-8b), the vision model used during testing.
-- [Mistral Small 3.2](https://lmstudio.ai/models/mistralai/mistral-small-3.2), the model I use to classify and tag my own photos.
+- [Mistral Small 3.2](https://lmstudio.ai/models/mistralai/mistral-small-3.2), the model I use (Q4_K_M) to classify and tag my own photos.
 - [ExifTool](https://exiftool.org/) for reading and writing image metadata.
 - Python packages: [Requests](https://requests.readthedocs.io/), [Pillow](https://python-pillow.org/), [pillow-heif](https://github.com/bigcat88/pillow_heif), [piexif](https://github.com/hMatoba/Piexif), and [PyExifTool](https://github.com/sylikc/pyexiftool).
