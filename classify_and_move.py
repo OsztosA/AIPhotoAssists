@@ -262,12 +262,21 @@ def classify_image(image_path: str, api_url: str = API_URL, model: str = DEFAULT
     return None
 
 
+def wait_while_paused(pause_event: Optional[threading.Event], stop_event: Optional[threading.Event]) -> None:
+    """Blocks while pause_event is set; returns early when stop_event is set."""
+    while pause_event is not None and pause_event.is_set():
+        if stop_event is not None and stop_event.is_set():
+            return
+        time.sleep(1)
+
+
 def process_single_image(original_path: str, root_path: str, output_directory: str, dry_run: bool = False,
                          api_url: str = API_URL, model: str = DEFAULT_MODEL,
                          log: LogCallback = print, stop_event: Optional[threading.Event] = None,
                          with_tags: bool = True, on_start: Optional[StartCallback] = None,
                          max_dimension: int = 1024, tag_count: int = 5, copy_files: bool = False,
-                         rename_pattern: Optional[str] = None) -> dict:
+                         rename_pattern: Optional[str] = None,
+                         pause_event: Optional[threading.Event] = None) -> dict:
     """
     Classifies a single image and moves it. Designed to be run in a thread pool.
     Returns a dict: {'path', 'status', 'score', 'dest', 'tags', 'useless'} where status is one of
@@ -284,6 +293,7 @@ def process_single_image(original_path: str, root_path: str, output_directory: s
         return {"path": original_path, "status": status, "score": score, "dest": dest, "tags": tags,
                 "useless": useless}
 
+    wait_while_paused(pause_event, stop_event)
     if stop_event is not None and stop_event.is_set():
         return result("cancelled")
 
@@ -347,12 +357,14 @@ def process_single_image(original_path: str, root_path: str, output_directory: s
 
 def process_single_video(original_path: str, root_path: str, output_directory: str, dry_run: bool = False,
                          copy_files: bool = False, rename_pattern: Optional[str] = None,
-                         log: LogCallback = print, stop_event: Optional[threading.Event] = None) -> dict:
+                         log: LogCallback = print, stop_event: Optional[threading.Event] = None,
+                         pause_event: Optional[threading.Event] = None) -> dict:
     """Renames and places a video in output_directory/videos without analyzing or modifying its metadata."""
     def result(status: str, dest: Optional[str] = None) -> dict:
         return {"path": original_path, "status": status, "score": None, "dest": dest, "tags": [],
                 "useless": False, "is_video": True}
 
+    wait_while_paused(pause_event, stop_event)
     if stop_event is not None and stop_event.is_set():
         return result("cancelled")
 
@@ -392,6 +404,7 @@ def run_classification(root_path: str, output_directory: str, max_workers: int =
                        api_url: str = API_URL, model: str = DEFAULT_MODEL,
                        log: LogCallback = print, progress: Optional[ProgressCallback] = None,
                        stop_event: Optional[threading.Event] = None,
+                       pause_event: Optional[threading.Event] = None,
                        on_result: Optional[ResultCallback] = None,
                        on_start: Optional[StartCallback] = None,
                        with_tags: bool = True, max_dimension: int = 1024,
@@ -475,11 +488,12 @@ def run_classification(root_path: str, output_directory: str, max_workers: int =
         for path, is_video in paths_to_process:
             if is_video:
                 future = executor.submit(process_single_video, path, root_path, output_directory, dry_run,
-                                         copy_files, video_rename_pattern or rename_pattern, log, stop_event)
+                                         copy_files, video_rename_pattern or rename_pattern,
+                                         log, stop_event, pause_event)
             else:
                 future = executor.submit(process_single_image, path, root_path, output_directory, dry_run,
                                          api_url, model, log, stop_event, with_tags, on_start, max_dimension,
-                                         tag_count, copy_files, rename_pattern)
+                                         tag_count, copy_files, rename_pattern, pause_event)
             future_to_path[future] = path
 
         for future in concurrent.futures.as_completed(future_to_path):

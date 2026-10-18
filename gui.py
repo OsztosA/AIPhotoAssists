@@ -40,14 +40,18 @@ class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("PhotoAssist - Classify & Move")
-        self.geometry("900x760")
         self.minsize(760, 600)
 
         self.msg_queue: queue.Queue = queue.Queue()
         self.stop_event = threading.Event()
+        self.pause_event = threading.Event()
         self.worker: threading.Thread | None = None
 
         s = self._load_settings()
+        try:
+            self.geometry(s.get("geometry") or "900x760")
+        except tk.TclError:
+            self.geometry("900x760")
         self.source_var = tk.StringVar(value=s.get("source", DEFAULT_SOURCE))
         self.target_var = tk.StringVar(value=s.get("target", DEFAULT_TARGET))
         self.exiftool_var = tk.StringVar(value=s.get("exiftool_path", ""))
@@ -79,7 +83,11 @@ class App(tk.Tk):
             max_dimension = DEFAULT_MAX_DIMENSION
         self.max_dimension_var = tk.IntVar(value=min(MAX_MAX_DIMENSION, max(
             MIN_MAX_DIMENSION, max_dimension)))
-        self.tag_count_var = tk.IntVar(value=max(1, int(s.get("tag_count", DEFAULT_TAG_COUNT))))
+        try:
+            tag_count = max(1, int(s.get("tag_count", DEFAULT_TAG_COUNT)))
+        except (TypeError, ValueError):
+            tag_count = DEFAULT_TAG_COUNT
+        self.tag_count_var = tk.IntVar(value=tag_count)
         self.limit: int | None = None          # detected max parallel requests for current api+model
         self.model_types: dict[str, str | None] = {}  # model id -> 'vlm' / 'llm' / ... (LM Studio)
         self.limit_key: tuple | None = None
@@ -208,6 +216,8 @@ class App(tk.Tk):
         self.start_btn.pack(side="left")
         self.stop_btn = ttk.Button(controls, text="■  Stop", command=self.stop, state="disabled")
         self.stop_btn.pack(side="left", padx=8)
+        self.pause_btn = ttk.Button(controls, text="⏸  Pause", command=self.toggle_pause, state="disabled")
+        self.pause_btn.pack(side="left")
 
         # Progress
         prog = ttk.LabelFrame(root, text="Progress", padding=8)
@@ -460,7 +470,7 @@ class App(tk.Tk):
             "source": self.source_var.get(), "target": self.target_var.get(),
             "exiftool_path": self.exiftool_var.get(),
             "api_url": self.api_var.get(), "api_urls": self.backend_urls, "model": self.model_var.get(),
-            "workers": self._workers(), "dry_run": self.dry_run_var.get(), "mode": self.mode_var.get(),
+            "workers": self._requested_workers(), "geometry": self.geometry(), "dry_run": self.dry_run_var.get(), "mode": self.mode_var.get(),
             "benchmark": self.benchmark_var.get(), "benchmark_files": self._benchmark_file_count(),
             "rename": self.rename_var.get(), "rename_videos": self.rename_videos_var.get(),
             "rename_pattern": self.rename_pattern_var.get(),
@@ -499,11 +509,14 @@ class App(tk.Tk):
     def _update_benchmark_state(self):
         self.benchmark_files_spin.configure(state="normal" if self.benchmark_var.get() else "disabled")
 
-    def _workers(self) -> int:
+    def _requested_workers(self) -> int:
         try:
-            n = max(1, int(self.workers_var.get()))
+            return max(1, int(self.workers_var.get()))
         except (tk.TclError, ValueError):
-            n = DEFAULT_WORKERS
+            return DEFAULT_WORKERS
+
+    def _workers(self) -> int:
+        n = self._requested_workers()
         return min(n, self.limit) if self.limit else n
 
     # ---------- Parallel request limit ----------
@@ -596,6 +609,7 @@ class App(tk.Tk):
     def _launch(self):
         source, target = self.source_var.get().strip(), self.target_var.get().strip()
         self.stop_event.clear()
+        self.pause_event.clear()
         self._set_running(True)
         self.progress.configure(value=0)
         self.status_var.set("Starting...")
@@ -655,6 +669,7 @@ class App(tk.Tk):
                     log=lambda m: self.msg_queue.put(("log", m)),
                     progress=lambda s: self.msg_queue.put(("progress", s)),
                     stop_event=self.stop_event,
+                    pause_event=self.pause_event,
                     on_result=on_result,
                     on_start=self._preview_start,
                 )
@@ -702,10 +717,22 @@ class App(tk.Tk):
     def stop(self):
         self.stop_event.set()
         self.stop_btn.configure(state="disabled")
+        self.pause_btn.configure(state="disabled")
         self.status_var.set("Stopping... waiting for running requests to finish.")
+
+    def toggle_pause(self):
+        if self.pause_event.is_set():
+            self.pause_event.clear()
+            self.pause_btn.configure(text="⏸  Pause")
+            self.status_var.set("Resumed.")
+        else:
+            self.pause_event.set()
+            self.pause_btn.configure(text="▶  Resume")
+            self.status_var.set("Paused. Running requests will finish; no new images will be started.")
 
     def _set_running(self, running: bool):
         self.start_btn.configure(state="disabled" if running else "normal")
+        self.pause_btn.configure(state="normal" if running else "disabled", text="⏸  Pause")
         self.stop_btn.configure(state="normal" if running else "disabled")
         self.detect_btn.configure(state="disabled" if running else "normal")
 
@@ -781,7 +808,7 @@ class App(tk.Tk):
         self.progress.configure(value=(done / total * 100) if total else 0)
         if s["finished"]:
             self.status_var.set(f"Finished: {done}/{total} files.")
-        elif not self.stop_event.is_set():
+        elif not self.stop_event.is_set() and not self.pause_event.is_set():
             self.status_var.set(f"Processing {done}/{total} files ({done / total * 100:.0f}%)")
         self.stats_var.set(
             f"Rate: {s['rate']:.2f} files/s   |   Avg: {s['avg_time']:.2f} s/file   |   "
