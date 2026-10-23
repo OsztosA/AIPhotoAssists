@@ -129,7 +129,8 @@ def format_new_filename(pattern: str, taken: datetime, filename: str) -> str:
     %NAME% (the original name without extension, case-insensitive). The extension is kept. Characters that are not
     allowed in file names are replaced (':' -> '.'), e.g. 'YYYY.MM.DD HH24.MI.SS - %NAME%' ->
     '2014.03.01 11.48.00 - P1420703.JPG'.
-    A file that already follows the pattern keeps its original %name% part (so renaming twice does not stack dates).
+    A file that already follows the pattern is returned unchanged (so renaming twice does not stack dates or
+    replace its existing name).
     """
     stem, ext = os.path.splitext(filename)
     parts = _PATTERN_TOKEN.split(pattern)  # literals at even indexes, tokens at odd indexes
@@ -141,7 +142,7 @@ def format_new_filename(pattern: str, taken: datetime, filename: str) -> str:
                         for i, p in enumerate(parts))
         m = re.fullmatch(regex, stem)
         if m:
-            stem = m.group("name")
+            return filename
     values = {"YYYY": f"{taken.year:04d}", "MM": f"{taken.month:02d}", "DD": f"{taken.day:02d}",
               "HH24": f"{taken.hour:02d}", "MI": f"{taken.minute:02d}", "SS": f"{taken.second:02d}",
               "%name%": stem}
